@@ -440,6 +440,13 @@ Rules:
             error.message
         );
 
+        if (error.stack) {
+           console.log(
+               "Error stack:",
+               error.stack
+           );
+        }
+
         throw error;
     }
 }
