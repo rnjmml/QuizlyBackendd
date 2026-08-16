@@ -241,6 +241,8 @@ function validateQuiz(quiz, count) {
 
 async function createAIQuiz(subject, mode, questionCount) {
 
+    console.log("AI SUBJECT RECEIVED:", subject);
+    
     if (!process.env.OPENROUTER_API_KEY) {
         throw new Error("OPENROUTER_API_KEY is missing");
     }
@@ -1045,6 +1047,10 @@ async function generateRoomQuiz(room) {
     );
 
     try {
+
+        console.log("ROOM SUBJECT BEFORE AI:", room.subject);
+        console.log("ROOM ID:", room.id);
+        console.log("GENERATING QUIZ FOR:", room.subject);
 
         const quiz =
             await createAIQuiz(
