@@ -980,6 +980,18 @@ function roomData(room) {
 
         questionStartAt:
             room.questionStartAt,
+        timeLeft:
+            room.status === "active" &&
+            room.quizStatus === "ready" &&
+            room.questionStartAt
+                ? Math.max(
+                    0,
+                    room.questionStartAt +
+                        QUESTION_TIME -
+                        Date.now()
+                )
+                : null,
+
         countdownMs:
             room.status === "starting"
                 ? Math.max(
