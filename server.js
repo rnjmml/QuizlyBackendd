@@ -104,7 +104,14 @@ function extractJson(content) {
     text = text.trim();
 
     try {
-        return JSON.parse(text);
+        const parsed = JSON.parse(text);
+
+        if (Array.isArray(parsed)) {
+            return { questions: parsed};
+        }
+
+        return parsed;
+        
     } catch (error) {
     }
 
@@ -199,12 +206,19 @@ function validateQuiz(quiz, count) {
                 return false;
             }
 
-            if (typeof q.answer !== "string") {
+            if (
+                typeof q.answer !== "string" &&
+                typeof q.correct !== "string"
+            ) {
                 return false;
             }
 
-            const answer = q.answer.trim().toLowerCase();
-
+            const answer = (
+                typeof q.answer === "string"
+                    ? q.answer
+                    : q.correct
+            ).trim().toLowerCase();
+            
             const validAnswer = q.options.some(function(option) {
                 return String(option).trim().toLowerCase() === answer;
             });
@@ -220,7 +234,11 @@ function validateQuiz(quiz, count) {
                     return String(option).trim();
                 }),
 
-                answer: q.answer.trim(),
+                answer: (
+                    typeof q.answer === "string"
+                        ? q.answer
+                        : q.correct
+                ).trim(),
 
                 explanation: q.explanation
                     ? String(q.explanation).trim()
@@ -315,7 +333,12 @@ Rules:
                 model: AI_MODEL,
                 prompt:
                     "You create accurate educational multiple-choice quizzes. " +
-                    "Return only JSON that follows that requested schema. \n\n" +
+                    "Return ONLY a JSON object with a single key \"questions\" " +
+                    "whose value is an array of question objects. " +
+                    "Each question object must use exactly these keys: " +
+                    "\"question\" (string), \"options\" (array of 4 strings), " +
+                    "\"answer\" (string that exactly matches one of the options), " +
+                    "and \"explanation\" (short string).\n\n" +
                     prompt
              
             },
