@@ -1546,7 +1546,7 @@ currentQuestion:
             ) {
 
                console.log(
-                   "MERGED PLAYER INTO ACTIVE GENERATION"
+                   "MERGED PLAYER INTO ACTIVE GENERATION",
                    room.id
                );
            }
