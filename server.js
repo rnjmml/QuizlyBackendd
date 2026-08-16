@@ -1558,7 +1558,7 @@ currentQuestion:
                "status",
                room.status,
 
-               "quizStatus"
+               "quizStatus",
                room.quizStatus
             );
 
