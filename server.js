@@ -380,6 +380,20 @@ Rules:
 
             console.log("AI QUIZ VALIDATION FAILED");
 
+            console.log(
+                "RAW AI RESPONSE",
+                content
+            );
+
+            console.log(
+                "PARSED QUIZ:",
+                JSON.stringify(
+                    quiz,
+                    null,
+                    2
+                )
+            );
+            
             throw new Error(
                 "The AI did not return the required number of valid questions."
             );
