@@ -31,34 +31,59 @@ app.get("/health", (req, res) => {
     });
 });
 
-
 /* =========================
    AI QUIZ
 ========================= */
 
-const subjectRules = {
-    English:
-        "English language, grammar, vocabulary, reading comprehension, and basic literature",
+function cleanAIResponse(content) {
+    let cleaned = String(content || "").trim();
 
-    Math:
-        "mathematics appropriate for students, including arithmetic, algebra, geometry, and problem solving",
+    cleaned = cleaned
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
 
-    Science:
-        "general science, biology, chemistry, physics, Earth science, and basic scientific concepts"
-};
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
 
+    if (firstBrace !== -1 && lastBrace !== -1) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
 
-function createQuizPrompt(subject, mode, count) {
+    return cleaned;
+}
+
+async function createAIQuiz(subject, mode, questionCount = 10) {
+    if (!process.env.OPENROUTER_API_KEY) {
+        throw new Error("OPENROUTER_API_KEY is missing");
+    }
+
+    const count = Math.min(
+        Math.max(Number(questionCount) || 10, 1),
+        20
+    );
+
+    const subjectRules = {
+        English:
+            "English language, grammar, vocabulary, reading comprehension, and basic literature",
+
+        Math:
+            "mathematics appropriate for students, including arithmetic, algebra, geometry, and problem solving",
+
+        Science:
+            "general science, biology, chemistry, physics, Earth science, and basic scientific concepts"
+    };
 
     const topic =
-        subjectRules[subject] || subjectRules.English;
+        subjectRules[subject] ||
+        subjectRules.English;
 
     const difficulty =
         mode === "Compete"
             ? "moderate difficulty with some challenging questions"
             : "beginner to moderate difficulty";
 
-    return `
+    const prompt = `
 Create a quiz for the educational game QuiZly.
 
 Subject: ${subject}
@@ -69,7 +94,7 @@ Difficulty: ${difficulty}
 The questions must focus on:
 ${topic}
 
-Return ONLY a JSON object.
+Return ONLY valid JSON.
 
 The JSON must have exactly this structure:
 
@@ -90,13 +115,12 @@ The JSON must have exactly this structure:
 }
 
 Rules:
-
 - Create exactly ${count} questions.
 - Every question must have exactly 4 options.
 - Only one option may be correct.
 - The answer must exactly match one of the four options.
-- Do not use All of the above.
-- Do not use None of the above.
+- Do not use "All of the above".
+- Do not use "None of the above".
 - Do not repeat questions.
 - Keep questions appropriate for students.
 - Keep explanations short and easy to understand.
@@ -104,157 +128,14 @@ Rules:
 - Do not include code fences.
 - Do not include anything outside the JSON object.
 `;
-}
 
-
-function cleanAIContent(content) {
-
-    if (!content) {
-        return "";
-    }
-
-    if (typeof content !== "string") {
-
-        if (Array.isArray(content)) {
-
-            return content
-                .map(function(item) {
-                    if (typeof item === "string") {
-                        return item;
-                    }
-
-                    if (item && typeof item.text === "string") {
-                        return item.text;
-                    }
-
-                    return "";
-                })
-                .join("");
-        }
-
-        return JSON.stringify(content);
-    }
-
-    let cleaned = content.trim();
-
-    cleaned = cleaned
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
-
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
-
-    if (firstBrace !== -1 && lastBrace !== -1) {
-        cleaned = cleaned.substring(
-            firstBrace,
-            lastBrace + 1
-        );
-    }
-
-    return cleaned.trim();
-}
-
-
-function validateQuiz(quiz, count) {
-
-    if (
-        !quiz ||
-        !Array.isArray(quiz.questions)
-    ) {
-        return null;
-    }
-
-    const questions = quiz.questions
-        .filter(function(q) {
-
-            if (
-                !q ||
-                typeof q.question !== "string" ||
-                !Array.isArray(q.options) ||
-                q.options.length !== 4 ||
-                typeof q.answer !== "string"
-            ) {
-                return false;
-            }
-
-            const options = q.options.map(function(option) {
-                return String(option).trim();
-            });
-
-            const answer =
-                q.answer.trim().toLowerCase();
-
-            const answerExists =
-                options.some(function(option) {
-                    return option.toLowerCase() === answer;
-                });
-
-            return answerExists;
-        })
-        .slice(0, count)
-        .map(function(q) {
-
-            const options = q.options.map(function(option) {
-                return String(option).trim();
-            });
-
-            const answer = q.answer.trim();
-
-            const correctOption = options.find(function(option) {
-                return option.toLowerCase() === answer.toLowerCase();
-            });
-
-            return {
-                question: q.question.trim(),
-                options: options,
-                answer: correctOption || answer,
-                explanation: q.explanation
-                    ? String(q.explanation).trim()
-                    : ""
-            };
-        });
-
-    if (questions.length !== count) {
-        return null;
-    }
-
-    return questions;
-}
-
-
-async function generateQuiz(subject, mode, questionCount) {
-
-    if (!process.env.OPENROUTER_API_KEY) {
-
-        throw new Error(
-            "OPENROUTER_API_KEY is missing"
-        );
-    }
-
-    const count = Math.min(
-        Math.max(
-            Number(questionCount) || 10,
-            1
-        ),
-        20
-    );
-
-    const prompt =
-        createQuizPrompt(
-            subject,
-            mode,
-            count
-        );
-
-    console.log("--------------------------------");
-    console.log("GENERATING AI QUIZ");
-    console.log("Model:", AI_MODEL);
+    console.log("=================================");
+    console.log("CREATING AI QUIZ");
     console.log("Subject:", subject);
     console.log("Mode:", mode);
     console.log("Questions:", count);
-    console.log("--------------------------------");
+    console.log("Model:", AI_MODEL);
+    console.log("=================================");
 
     const response = await axios.post(
         OPENROUTER_URL,
@@ -265,7 +146,7 @@ async function generateQuiz(subject, mode, questionCount) {
                 {
                     role: "system",
                     content:
-                        "You create accurate educational multiple-choice quizzes. Return only valid JSON."
+                        "You create accurate educational multiple-choice quizzes. Return valid JSON only."
                 },
                 {
                     role: "user",
@@ -273,116 +154,116 @@ async function generateQuiz(subject, mode, questionCount) {
                 }
             ],
 
-            response_format: {
-                type: "json_object"
-            },
-
-            temperature: 0.3,
-
+            temperature: 0.4,
             max_tokens: 5000
         },
         {
             headers: {
                 "Content-Type": "application/json",
-
                 "Authorization":
                     `Bearer ${process.env.OPENROUTER_API_KEY}`,
-
                 "HTTP-Referer":
                     "https://quizlybackendd.onrender.com",
-
-                "X-Title":
-                    "QuiZly"
+                "X-Title": "QuiZly"
             },
 
             timeout: 120000
         }
     );
 
-    console.log("OPENROUTER RESPONSE RECEIVED");
+    const content =
+        response.data?.choices?.[0]?.message?.content;
 
-    const message =
-        response.data?.choices?.[0]?.message;
-
-    let content =
-        message?.content;
+    console.log("AI RESPONSE RECEIVED");
 
     if (!content) {
-
-        console.log(
-            "OpenRouter returned no message content"
-        );
-
-        console.log(
-            JSON.stringify(
-                response.data,
-                null,
-                2
-            )
-        );
+        console.log(response.data);
 
         throw new Error(
-            "The AI returned no content."
+            "The AI did not return any content."
         );
     }
 
-    content =
-        cleanAIContent(content);
-
-    console.log("AI CONTENT:");
+    console.log("RAW AI CONTENT:");
     console.log(content);
+
+    const cleaned = cleanAIResponse(content);
 
     let quiz;
 
     try {
-
-        quiz =
-            JSON.parse(content);
-
+        quiz = JSON.parse(cleaned);
     } catch (error) {
-
-        console.log(
-            "JSON parsing failed."
-        );
-
-        console.log(
-            "Raw AI response:"
-        );
-
-        console.log(content);
+        console.log("JSON PARSE ERROR");
+        console.log("CLEANED RESPONSE:");
+        console.log(cleaned);
 
         throw new Error(
             "The AI returned an invalid quiz format."
         );
     }
 
-    const questions =
-        validateQuiz(
-            quiz,
-            count
-        );
-
-    if (!questions) {
-
-        console.log(
-            "Quiz validation failed."
-        );
-
-        console.log(
-            JSON.stringify(
-                quiz,
-                null,
-                2
-            )
-        );
-
+    if (
+        !quiz ||
+        !quiz.questions ||
+        !Array.isArray(quiz.questions)
+    ) {
         throw new Error(
-            "The AI returned an invalid quiz format."
+            "The AI response does not contain questions."
+        );
+    }
+
+    const questions = quiz.questions
+        .filter(function(q) {
+            if (
+                !q ||
+                typeof q.question !== "string" ||
+                !Array.isArray(q.options) ||
+                q.options.length !== 4 ||
+                typeof q.answer !== "string"
+            ) {
+                return false;
+            }
+
+            const answer =
+                q.answer.trim().toLowerCase();
+
+            const validAnswer =
+                q.options.some(function(option) {
+                    return (
+                        String(option)
+                            .trim()
+                            .toLowerCase() === answer
+                    );
+                });
+
+            return validAnswer;
+        })
+        .slice(0, count)
+        .map(function(q) {
+            return {
+                question: q.question.trim(),
+
+                options: q.options.map(function(option) {
+                    return String(option).trim();
+                }),
+
+                answer: q.answer.trim(),
+
+                explanation: q.explanation
+                    ? String(q.explanation).trim()
+                    : ""
+            };
+        });
+
+    if (questions.length < count) {
+        throw new Error(
+            `The AI only created ${questions.length} valid questions out of ${count}.`
         );
     }
 
     console.log(
-        `AI QUIZ CREATED: ${questions.length} questions`
+        `AI QUIZ CREATED: ${questions.length} QUESTIONS`
     );
 
     return {
@@ -398,19 +279,14 @@ async function generateQuiz(subject, mode, questionCount) {
 ========================= */
 
 app.get("/test-ai", async (req, res) => {
-
     try {
+        console.log("TESTING OPENROUTER");
 
-        console.log(
-            "TESTING OPENROUTER"
+        const quiz = await createAIQuiz(
+            "English",
+            "Study",
+            5
         );
-
-        const quiz =
-            await generateQuiz(
-                "English",
-                "Study",
-                3
-            );
 
         res.json({
             success: true,
@@ -418,13 +294,9 @@ app.get("/test-ai", async (req, res) => {
         });
 
     } catch (error) {
-
-        console.log(
-            "OPENROUTER TEST FAILED"
-        );
+        console.log("OPENROUTER TEST FAILED");
 
         if (error.response) {
-
             console.log(
                 "STATUS:",
                 error.response.status
@@ -451,7 +323,7 @@ app.get("/test-ai", async (req, res) => {
             error.message
         );
 
-        return res.status(500).json({
+        res.status(500).json({
             success: false,
             error: error.message
         });
@@ -464,11 +336,7 @@ app.get("/test-ai", async (req, res) => {
 ========================= */
 
 app.post("/quiz", async (req, res) => {
-
-    console.log(
-        "QUIZ REQUEST RECEIVED"
-    );
-
+    console.log("QUIZ REQUEST RECEIVED");
     console.log(req.body);
 
     const {
@@ -478,26 +346,18 @@ app.post("/quiz", async (req, res) => {
     } = req.body;
 
     try {
-
-        const quiz =
-            await generateQuiz(
-                subject,
-                mode,
-                questionCount
-            );
-
-        res.status(200).json(
-            quiz
+        const quiz = await createAIQuiz(
+            subject,
+            mode,
+            questionCount
         );
+
+        res.status(200).json(quiz);
 
     } catch (error) {
-
-        console.log(
-            "AI QUIZ ERROR"
-        );
+        console.log("AI QUIZ ERROR");
 
         if (error.response) {
-
             console.log(
                 "OPENROUTER STATUS:",
                 error.response.status
@@ -515,10 +375,8 @@ app.post("/quiz", async (req, res) => {
             return res.status(502).json({
                 message:
                     "OpenRouter request failed.",
-
                 status:
                     error.response.status,
-
                 error:
                     error.response.data
             });
@@ -532,7 +390,6 @@ app.post("/quiz", async (req, res) => {
         return res.status(502).json({
             message:
                 "Could not create quiz.",
-
             error:
                 error.message
         });
@@ -545,7 +402,6 @@ app.post("/quiz", async (req, res) => {
 ========================= */
 
 async function findUser(field, value) {
-
     const response = await axios.get(
         `${DB_BASE}?${field}=${encodeURIComponent(value)}`,
         {
@@ -557,15 +413,12 @@ async function findUser(field, value) {
         response.data &&
         response.data.data;
 
-    return records &&
-        records.length
+    return records && records.length
         ? records[0]
         : null;
 }
 
-
 function publicProfile(user) {
-
     return {
         id: user._id,
         username: user.username,
@@ -577,8 +430,11 @@ function publicProfile(user) {
 }
 
 
-app.post("/register", async (req, res) => {
+/* =========================
+   REGISTER
+========================= */
 
+app.post("/register", async (req, res) => {
     console.log(
         "REGISTER REQUEST RECEIVED"
     );
@@ -591,12 +447,7 @@ app.post("/register", async (req, res) => {
         password
     } = req.body;
 
-    if (
-        !username ||
-        !email ||
-        !password
-    ) {
-
+    if (!username || !email || !password) {
         return res.status(400).json({
             message:
                 "Please fill in all fields"
@@ -604,7 +455,6 @@ app.post("/register", async (req, res) => {
     }
 
     try {
-
         const existing =
             await findUser(
                 "username",
@@ -612,7 +462,6 @@ app.post("/register", async (req, res) => {
             );
 
         if (existing) {
-
             return res.status(409).json({
                 message:
                     "Username already taken"
@@ -630,8 +479,7 @@ app.post("/register", async (req, res) => {
                     characters: []
                 },
                 {
-                    headers:
-                        dbHeaders()
+                    headers: dbHeaders()
                 }
             );
 
@@ -647,13 +495,11 @@ app.post("/register", async (req, res) => {
         });
 
     } catch (error) {
-
         console.log(
             "DATABASE ERROR"
         );
 
         if (error.response) {
-
             console.log(
                 "Status:",
                 error.response.status
@@ -663,9 +509,7 @@ app.post("/register", async (req, res) => {
                 "Data:",
                 error.response.data
             );
-
         } else {
-
             console.log(
                 "Error:",
                 error.message
@@ -680,8 +524,11 @@ app.post("/register", async (req, res) => {
 });
 
 
-app.post("/login", async (req, res) => {
+/* =========================
+   LOGIN
+========================= */
 
+app.post("/login", async (req, res) => {
     console.log(
         "LOGIN REQUEST RECEIVED"
     );
@@ -691,11 +538,7 @@ app.post("/login", async (req, res) => {
         password
     } = req.body;
 
-    if (
-        !username ||
-        !password
-    ) {
-
+    if (!username || !password) {
         return res.status(400).json({
             message:
                 "Please enter your username and password."
@@ -703,7 +546,6 @@ app.post("/login", async (req, res) => {
     }
 
     try {
-
         const user =
             await findUser(
                 "username",
@@ -714,7 +556,6 @@ app.post("/login", async (req, res) => {
             !user ||
             user.password !== password
         ) {
-
             return res.status(401).json({
                 message:
                     "Incorrect username or password"
@@ -730,13 +571,11 @@ app.post("/login", async (req, res) => {
         });
 
     } catch (error) {
-
         console.log(
             "DATABASE ERROR"
         );
 
         if (error.response) {
-
             console.log(
                 "Status:",
                 error.response.status
@@ -746,9 +585,7 @@ app.post("/login", async (req, res) => {
                 "Data:",
                 error.response.data
             );
-
         } else {
-
             console.log(
                 "Error:",
                 error.message
@@ -768,9 +605,7 @@ app.post("/login", async (req, res) => {
 ========================= */
 
 async function getUserById(id) {
-
     try {
-
         const response =
             await axios.get(
                 `${DB_BASE}/${id}`,
@@ -783,12 +618,10 @@ async function getUserById(id) {
         return response.data;
 
     } catch (error) {
-
         if (
             error.response &&
             error.response.status === 404
         ) {
-
             return null;
         }
 
@@ -796,9 +629,7 @@ async function getUserById(id) {
     }
 }
 
-
 async function updateUser(id, fields) {
-
     const response =
         await axios.patch(
             `${DB_BASE}/${id}`,
@@ -813,126 +644,56 @@ async function updateUser(id, fields) {
 }
 
 
-app.get("/profile/:id", async (req, res) => {
-
-    try {
-
-        const user =
-            await getUserById(
-                req.params.id
-            );
-
-        if (!user) {
-
-            return res.status(404).json({
-                message:
-                    "Profile not found"
-            });
-        }
-
-        res.status(200).json({
-            profile:
-                publicProfile(user)
-        });
-
-    } catch (error) {
-
-        console.log(
-            "DATABASE ERROR",
-            error.message
-        );
-
-        res.status(500).json({
-            message:
-                "Server error"
-        });
-    }
-});
-
-
-app.patch("/profile/:id", async (req, res) => {
-
-    const {
-        characterId
-    } = req.body;
-
-    try {
-
-        const user =
-            await getUserById(
-                req.params.id
-            );
-
-        if (!user) {
-
-            return res.status(404).json({
-                message:
-                    "Profile not found"
-            });
-        }
-
-        const characters =
-            user.characters || [];
-
-        if (
-            characterId &&
-            !characters.includes(characterId)
-        ) {
-
-            characters.push(
-                characterId
-            );
-        }
-
-        const updated =
-            await updateUser(
-                req.params.id,
-                {
-                    characters
-                }
-            );
-
-        res.status(200).json({
-            message:
-                "Profile updated",
-
-            profile:
-                publicProfile(updated)
-        });
-
-    } catch (error) {
-
-        console.log(
-            "PATCH ERROR",
-            error.message
-        );
-
-        res.status(500).json({
-            message:
-                "Server error"
-        });
-    }
-});
-
-
-app.post(
-    "/profile/:id/awards",
+app.get(
+    "/profile/:id",
     async (req, res) => {
-
-        const {
-            stars = 0,
-            characterId
-        } = req.body;
-
         try {
-
             const user =
                 await getUserById(
                     req.params.id
                 );
 
             if (!user) {
+                return res.status(404).json({
+                    message:
+                        "Profile not found"
+                });
+            }
 
+            res.status(200).json({
+                profile:
+                    publicProfile(user)
+            });
+
+        } catch (error) {
+            console.log(
+                "DATABASE ERROR",
+                error.message
+            );
+
+            res.status(500).json({
+                message:
+                    "Server error"
+            });
+        }
+    }
+);
+
+
+app.patch(
+    "/profile/:id",
+    async (req, res) => {
+        const {
+            characterId
+        } = req.body;
+
+        try {
+            const user =
+                await getUserById(
+                    req.params.id
+                );
+
+            if (!user) {
                 return res.status(404).json({
                     message:
                         "Profile not found"
@@ -944,9 +705,79 @@ app.post(
 
             if (
                 characterId &&
-                !characters.includes(characterId)
+                !characters.includes(
+                    characterId
+                )
             ) {
+                characters.push(
+                    characterId
+                );
+            }
 
+            const updated =
+                await updateUser(
+                    req.params.id,
+                    {
+                        characters:
+                            characters
+                    }
+                );
+
+            res.status(200).json({
+                message:
+                    "Profile updated",
+
+                profile:
+                    publicProfile(
+                        updated
+                    )
+            });
+
+        } catch (error) {
+            console.log(
+                "PATCH ERROR",
+                error.message
+            );
+
+            res.status(500).json({
+                message:
+                    "Server error"
+            });
+        }
+    }
+);
+
+
+app.post(
+    "/profile/:id/awards",
+    async (req, res) => {
+        const {
+            stars = 0,
+            characterId
+        } = req.body;
+
+        try {
+            const user =
+                await getUserById(
+                    req.params.id
+                );
+
+            if (!user) {
+                return res.status(404).json({
+                    message:
+                        "Profile not found"
+                });
+            }
+
+            const characters =
+                user.characters || [];
+
+            if (
+                characterId &&
+                !characters.includes(
+                    characterId
+                )
+            ) {
                 characters.push(
                     characterId
                 );
@@ -960,7 +791,8 @@ app.post(
                             (user.stars || 0) +
                             stars,
 
-                        characters
+                        characters:
+                            characters
                     }
                 );
 
@@ -972,11 +804,12 @@ app.post(
                     stars,
 
                 profile:
-                    publicProfile(updated)
+                    publicProfile(
+                        updated
+                    )
             });
 
         } catch (error) {
-
             console.log(
                 "AWARD ERROR",
                 error.message
@@ -1001,27 +834,36 @@ const ROOM_SIZE = 4;
 
 
 /*
-    A room now stores:
+   IMPORTANT
 
-    quiz: null
+   Questions are stored inside the room.
 
-    When everyone is ready:
+   Therefore:
 
-    quiz: {
-        subject,
-        mode,
-        questions
-    }
+   Player 1
+          |
+   Player 2
+          |
+   Player 3
+          |
+   Player 4
+          |
+          v
+   ONE OpenRouter request
+          |
+          v
+   room.questions
+          |
+      +---+---+---+
+      |   |   |   |
+     P1  P2  P3  P4
 
-    This means the AI is called
-    only once for the room.
+   Every player gets the SAME questions.
 */
 
 
 function findPlayerRoom(id) {
-
     for (const room of rooms) {
-
         if (
             room.players.some(
                 function(player) {
@@ -1029,7 +871,6 @@ function findPlayerRoom(id) {
                 }
             )
         ) {
-
             return room;
         }
     }
@@ -1039,15 +880,15 @@ function findPlayerRoom(id) {
 
 
 function findRoom(subject) {
-
     for (const room of rooms) {
-
         if (
             room.subject === subject &&
-            room.status === "waiting" &&
+            (
+                room.status === "waiting" ||
+                room.status === "generating"
+            ) &&
             room.players.length < ROOM_SIZE
         ) {
-
             return room;
         }
     }
@@ -1057,15 +898,11 @@ function findRoom(subject) {
 
 
 function roomData(room) {
-
     return {
         id: room.id,
 
         subject:
             room.subject,
-
-        mode:
-            room.mode,
 
         size:
             room.size,
@@ -1089,177 +926,173 @@ function roomData(room) {
             room.players,
 
         quizReady:
-            !!room.quiz,
+            Array.isArray(
+                room.questions
+            ),
 
-        quiz:
-            room.quiz
+        questions:
+            Array.isArray(
+                room.questions
+            )
+                ? room.questions
+                : null
     };
 }
 
 
 /*
-    Generates the quiz only once.
+   This function generates the quiz.
 
-    IMPORTANT:
-    This function checks if a quiz
-    already exists before calling AI.
+   It is protected by room.generating.
+
+   This prevents multiple users from
+   accidentally causing multiple AI requests.
 */
 
 async function generateRoomQuiz(room) {
 
-    if (room.quiz) {
-
+    if (room.questions) {
         console.log(
-            "ROOM ALREADY HAS QUIZ"
-        );
-
-        return room.quiz;
-    }
-
-    if (room.quizGenerating) {
-
-        console.log(
-            "QUIZ IS ALREADY BEING GENERATED"
-        );
-
-        return null;
-    }
-
-    room.quizGenerating = true;
-
-    try {
-
-        console.log("--------------------------------");
-        console.log(
-            "GENERATING MATCHMAKING QUIZ"
-        );
-        console.log(
-            "ROOM:",
+            "QUIZ ALREADY EXISTS FOR ROOM:",
             room.id
         );
-        console.log(
-            "SUBJECT:",
-            room.subject
-        );
-        console.log(
-            "MODE:",
-            room.mode
-        );
-        console.log("--------------------------------");
 
-        const quiz =
-            await generateQuiz(
-                room.subject,
-                room.mode,
-                room.questionCount
-            );
-
-        room.quiz = quiz;
-
-        console.log(
-            "MATCHMAKING QUIZ SAVED TO ROOM"
-        );
-
-        return quiz;
-
-    } catch (error) {
-
-        console.log(
-            "ROOM QUIZ GENERATION ERROR:",
-            error.message
-        );
-
-        room.quizError =
-            error.message;
-
-        return null;
-
-    } finally {
-
-        room.quizGenerating = false;
-    }
-}
-
-
-async function checkRoomStart(room) {
-
-    if (
-        room.status !== "waiting"
-    ) {
         return;
     }
 
-    if (
-        room.players.length === 0
-    ) {
-        return;
-    }
-
-    const everyoneReady =
-        room.players.every(
-            function(player) {
-                return player.vote === true;
-            }
+    if (room.generating) {
+        console.log(
+            "QUIZ ALREADY BEING GENERATED:",
+            room.id
         );
 
-    if (!everyoneReady) {
-        return;
+        return room.generating;
     }
 
     console.log(
-        "EVERY PLAYER IS READY"
+        "================================="
     );
 
-    /*
-        Generate the quiz ONE TIME.
-    */
+    console.log(
+        "GENERATING MATCHMAKING QUIZ"
+    );
 
-    if (!room.quiz) {
+    console.log(
+        "ROOM:",
+        room.id
+    );
 
-        const quiz =
-            await generateRoomQuiz(
-                room
-            );
+    console.log(
+        "SUBJECT:",
+        room.subject
+    );
 
-        if (!quiz) {
+    console.log(
+        "================================="
+    );
 
-            console.log(
-                "QUIZ GENERATION FAILED"
-            );
-
-            return;
-        }
-    }
 
     room.status =
-        "starting";
+        "generating";
 
-    room.startAt =
-        Date.now() + 5000;
 
-    console.log(
-        "ROOM STARTING"
-    );
+    room.generating =
+        createAIQuiz(
+            room.subject,
+            "Compete",
+            10
+        )
+        .then(function(quiz) {
 
-    setTimeout(
-        function() {
+            room.questions =
+                quiz.questions;
 
-            const index =
-                rooms.indexOf(room);
+            room.status =
+                "starting";
 
-            if (index !== -1) {
+            room.startAt =
+                Date.now() + 5000;
 
-                rooms.splice(
-                    index,
-                    1
-                );
-            }
+            console.log(
+                "================================="
+            );
 
-        },
-        60000
-    );
+            console.log(
+                "MATCHMAKING QUIZ READY"
+            );
+
+            console.log(
+                "ROOM:",
+                room.id
+            );
+
+            console.log(
+                "QUESTIONS:",
+                room.questions.length
+            );
+
+            console.log(
+                "================================="
+            );
+
+            setTimeout(
+                function() {
+
+                    if (
+                        rooms.includes(
+                            room
+                        )
+                    ) {
+                        room.status =
+                            "playing";
+
+                        console.log(
+                            "ROOM NOW PLAYING:",
+                            room.id
+                        );
+                    }
+
+                },
+                5000
+            );
+
+            return quiz;
+
+        })
+        .catch(function(error) {
+
+            console.log(
+                "MATCHMAKING AI ERROR"
+            );
+
+            console.log(
+                error.message
+            );
+
+            room.status =
+                "waiting";
+
+            room.questions =
+                null;
+
+            throw error;
+
+        })
+        .finally(function() {
+
+            room.generating =
+                null;
+
+        });
+
+
+    return room.generating;
 }
 
+
+/* =========================
+   MATCHMAKE
+========================= */
 
 app.post(
     "/matchmaking/matchmake",
@@ -1269,9 +1102,7 @@ app.post(
             id,
             name,
             character,
-            subject,
-            mode = "Compete",
-            questionCount = 10
+            subject
         } = req.body;
 
         if (
@@ -1279,20 +1110,22 @@ app.post(
             !name ||
             !subject
         ) {
-
             return res.status(400).json({
                 message:
                     "Missing matchmaking information"
             });
         }
 
+
         let room =
             findPlayerRoom(id);
+
 
         if (!room) {
 
             room =
                 findRoom(subject);
+
 
             if (!room) {
 
@@ -1308,20 +1141,6 @@ app.post(
                     subject:
                         subject,
 
-                    mode:
-                        mode,
-
-                    questionCount:
-                        Math.min(
-                            Math.max(
-                                Number(
-                                    questionCount
-                                ) || 10,
-                                1
-                            ),
-                            20
-                        ),
-
                     size:
                         ROOM_SIZE,
 
@@ -1331,17 +1150,14 @@ app.post(
                     startAt:
                         null,
 
-                    quiz:
-                        null,
-
-                    quizGenerating:
-                        false,
-
-                    quizError:
-                        null,
-
                     players:
-                        []
+                        [],
+
+                    questions:
+                        null,
+
+                    generating:
+                        null
                 };
 
                 rooms.push(room);
@@ -1352,8 +1168,8 @@ app.post(
                 );
             }
 
-            room.players.push({
 
+            room.players.push({
                 id:
                     id,
 
@@ -1366,6 +1182,13 @@ app.post(
                 vote:
                     null
             });
+
+
+            console.log(
+                "PLAYER JOINED ROOM:",
+                id,
+                room.id
+            );
 
         } else {
 
@@ -1386,6 +1209,7 @@ app.post(
             }
         }
 
+
         res.json(
             roomData(room)
         );
@@ -1394,7 +1218,7 @@ app.post(
 
 
 /* =========================
-   MATCHMAKING VOTE
+   VOTE / READY
 ========================= */
 
 app.post(
@@ -1406,25 +1230,32 @@ app.post(
             vote
         } = req.body;
 
+
         const room =
             findPlayerRoom(id);
 
-        if (!room) {
 
+        if (!room) {
             return res.status(404).json({
                 message:
                     "Matchmaking room not found"
             });
         }
 
-        if (
-            room.status === "starting"
-        ) {
 
+        if (
+            room.status ===
+            "starting" ||
+            room.status ===
+            "generating" ||
+            room.status ===
+            "playing"
+        ) {
             return res.json(
                 roomData(room)
             );
         }
+
 
         const player =
             room.players.find(
@@ -1433,25 +1264,78 @@ app.post(
                 }
             );
 
-        if (!player) {
 
+        if (!player) {
             return res.status(404).json({
                 message:
                     "Player not found"
             });
         }
 
+
         player.vote =
             vote === true;
 
+
+        console.log(
+            "PLAYER READY:",
+            id
+        );
+
+
+        const everyoneReady =
+            room.players.length > 0 &&
+            room.players.every(
+                function(player) {
+                    return player.vote === true;
+                }
+            );
+
+
         /*
-            checkRoomStart is async
-            because it may call the AI.
+           IMPORTANT:
+
+           We do NOT generate the quiz
+           when the first player presses ready.
+
+           We only generate when everyone
+           in the room is ready.
         */
 
-        await checkRoomStart(
-            room
-        );
+        if (
+            everyoneReady &&
+            room.players.length >= 2 &&
+            !room.questions &&
+            !room.generating
+        ) {
+
+            console.log(
+                "EVERYONE READY"
+            );
+
+            console.log(
+                "STARTING ONE AI REQUEST"
+            );
+
+
+            /*
+               Do not await this before
+               returning the response.
+
+               The frontend can poll the
+               matchmaking endpoint while
+               the AI is creating the quiz.
+            */
+
+            generateRoomQuiz(room)
+                .catch(function(error) {
+                    console.log(
+                        "ROOM QUIZ GENERATION FAILED:",
+                        error.message
+                    );
+                });
+        }
+
 
         res.json(
             roomData(room)
@@ -1466,23 +1350,21 @@ app.post(
 
 app.get(
     "/matchmaking/room/:id",
-    (req, res) => {
+    function(req, res) {
 
         const room =
-            rooms.find(
-                function(room) {
-                    return room.id ===
-                        req.params.id;
-                }
+            findPlayerRoom(
+                req.params.id
             );
 
-        if (!room) {
 
+        if (!room) {
             return res.status(404).json({
                 message:
-                    "Room not found"
+                    "Matchmaking room not found"
             });
         }
+
 
         res.json(
             roomData(room)
@@ -1497,42 +1379,49 @@ app.get(
 
 app.get(
     "/matchmaking/quiz/:id",
-    (req, res) => {
+    function(req, res) {
 
         const room =
-            rooms.find(
-                function(room) {
-                    return room.id ===
-                        req.params.id;
-                }
+            findPlayerRoom(
+                req.params.id
             );
 
-        if (!room) {
 
+        if (!room) {
             return res.status(404).json({
                 message:
-                    "Room not found"
+                    "Matchmaking room not found"
             });
         }
 
-        if (!room.quiz) {
+
+        if (
+            !room.questions
+        ) {
 
             return res.status(202).json({
                 message:
-                    "Quiz is not ready yet",
+                    "Quiz is still being created.",
+
+                status:
+                    room.status,
 
                 quizReady:
                     false
             });
         }
 
+
         res.json({
 
-            quizReady:
-                true,
+            subject:
+                room.subject,
 
-            quiz:
-                room.quiz
+            mode:
+                "Compete",
+
+            questions:
+                room.questions
         });
     }
 );
@@ -1544,30 +1433,38 @@ app.get(
 
 app.post(
     "/matchmaking/leave",
-    (req, res) => {
+    function(req, res) {
 
         const {
             id
         } = req.body;
 
+
         const room =
             findPlayerRoom(id);
 
-        if (!room) {
 
+        if (!room) {
             return res.json({
                 message:
                     "Player was not in a room"
             });
         }
 
+
         room.players =
             room.players.filter(
                 function(player) {
-
                     return player.id !== id;
                 }
             );
+
+
+        console.log(
+            "PLAYER LEFT ROOM:",
+            id
+        );
+
 
         if (
             room.players.length === 0
@@ -1576,14 +1473,21 @@ app.post(
             const index =
                 rooms.indexOf(room);
 
-            if (index !== -1) {
 
+            if (index !== -1) {
                 rooms.splice(
                     index,
                     1
                 );
             }
+
+
+            console.log(
+                "ROOM DELETED:",
+                room.id
+            );
         }
+
 
         res.json({
             message:
@@ -1600,9 +1504,10 @@ app.post(
 const PORT =
     process.env.PORT || 3000;
 
+
 app.listen(
     PORT,
-    () => {
+    function() {
 
         console.log(
             `Server running on port ${PORT}`
