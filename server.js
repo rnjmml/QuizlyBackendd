@@ -349,7 +349,7 @@ Rules:
             );
         }
 
-        let content = message.content;
+        /* let content = message.content; */
 
         if (content == null) {
             throw new Error(
