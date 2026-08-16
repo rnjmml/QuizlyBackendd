@@ -335,15 +335,7 @@ Rules:
         console.log("Prior model:", response.data?.model);
 
         let content = response.data?.response;
-
-        if (!message) {
-            throw new Error(
-                "OpenRouter did not return a message."
-            );
-        }
-
-        /* let content = message.content; */
-
+        
         if (content == null) {
             throw new Error(
                 "Prior did not return a response."
