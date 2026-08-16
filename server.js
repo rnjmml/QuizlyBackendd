@@ -921,10 +921,28 @@ app.post(
 /* =========================
    MATCHMAKING
 ========================= */
+/* =========================
+   MATCHMAKING
+========================= */
 
 const rooms = [];
 
 const ROOM_SIZE = 4;
+
+/*
+ * Matchmaking question timer.
+ *
+ * IMPORTANT:
+ * This is controlled by the SERVER.
+ * Players cannot individually move
+ * to the next question.
+ */
+const MATCH_QUESTION_TIME_MS = 10 * 1000;
+
+
+/* =========================
+   ROOM HELPERS
+========================= */
 
 function findPlayerRoom(id) {
 
@@ -932,7 +950,9 @@ function findPlayerRoom(id) {
 
         if (
             room.players.some(
-                p => p.id === id
+                function(player) {
+                    return player.id === id;
+                }
             )
         ) {
             return room;
@@ -941,6 +961,7 @@ function findPlayerRoom(id) {
 
     return null;
 }
+
 
 function findRoom(subject) {
 
@@ -958,30 +979,108 @@ function findRoom(subject) {
     return null;
 }
 
+
+/* =========================
+   ROOM DATA
+========================= */
+
 function roomData(room) {
+
+    const now =
+        Date.now();
+
+    let questionTimeLeftMs =
+        null;
+
+    if (
+        room.questionStartedAt !== null
+    ) {
+
+        questionTimeLeftMs =
+            Math.max(
+                0,
+                MATCH_QUESTION_TIME_MS -
+                (
+                    now -
+                    room.questionStartedAt
+                )
+            );
+    }
+
+    const currentQuestion =
+        room.currentQuestion;
+
+    const currentAnswers =
+        room.answers[currentQuestion] ||
+        {};
+
+    const currentReady =
+        room.questionReady[currentQuestion] ||
+        {};
 
     return {
 
-        id: room.id,
+        id:
+            room.id,
 
-        subject: room.subject,
+        subject:
+            room.subject,
 
-        size: room.size,
+        size:
+            room.size,
 
-        status: room.status,
+        status:
+            room.status,
 
         quizStatus:
             room.quizStatus,
 
         currentQuestion:
-            room.currentQuestion,
+            currentQuestion,
+
         countdownMs:
             room.status === "starting"
                 ? Math.max(
                     0,
-                    room.startAt - Date.now()
+                    room.startAt - now
                 )
                 : null,
+
+        /*
+         * Server-authoritative question timer.
+         */
+        questionStartedAt:
+            room.questionStartedAt,
+
+        questionDurationMs:
+            MATCH_QUESTION_TIME_MS,
+
+        questionTimeLeftMs:
+            questionTimeLeftMs,
+
+        questionActive:
+            room.status === "playing" &&
+            room.questionStartedAt !== null &&
+            questionTimeLeftMs > 0,
+
+        /*
+         * Number of players who have
+         * answered the current question.
+         */
+        answeredCount:
+            Object.keys(
+                currentAnswers
+            ).length,
+
+        /*
+         * Number of players who have
+         * confirmed that they received
+         * the current question.
+         */
+        readyCount:
+            Object.keys(
+                currentReady
+            ).length,
 
         count:
             room.players.length,
@@ -989,6 +1088,10 @@ function roomData(room) {
         players:
             room.players,
 
+        /*
+         * Only expose the quiz once
+         * it is ready.
+         */
         quiz:
             room.quizStatus === "ready"
                 ? room.quiz
@@ -1001,9 +1104,331 @@ function roomData(room) {
     };
 }
 
+
+/* =========================
+   QUESTION READY CHECK
+========================= */
+
+function areAllPlayersReady(room) {
+
+    if (
+        !room ||
+        room.players.length === 0
+    ) {
+        return false;
+    }
+
+    const questionIndex =
+        room.currentQuestion;
+
+    const ready =
+        room.questionReady[
+            questionIndex
+        ] || {};
+
+    return room.players.every(
+        function(player) {
+
+            return (
+                ready[player.id] === true
+            );
+
+        }
+    );
+}
+
+
+/* =========================
+   START QUESTION TIMER
+========================= */
+
+function startRoomQuestion(room) {
+
+    if (!room) {
+        return;
+    }
+
+    if (
+        room.status === "finished"
+    ) {
+        return;
+    }
+
+    if (
+        room.quizStatus !== "ready"
+    ) {
+        return;
+    }
+
+    /*
+     * Do not start another timer
+     * if this question is already active.
+     */
+    if (
+        room.questionStartedAt !== null
+    ) {
+        return;
+    }
+
+    if (
+        room.players.length === 0
+    ) {
+        return;
+    }
+
+    /*
+     * The timer starts ONLY after
+     * every player has received
+     * the question.
+     */
+    if (
+        !areAllPlayersReady(room)
+    ) {
+        return;
+    }
+
+    /*
+     * Make sure the room is actually
+     * in the playing state.
+     */
+    room.status =
+        "playing";
+
+    /*
+     * This timestamp is the single
+     * source of truth for the timer.
+     */
+    room.questionStartedAt =
+        Date.now();
+
+    console.log(
+        "================================="
+    );
+
+    console.log(
+        "MATCHMAKING QUESTION STARTED"
+    );
+
+    console.log(
+        "ROOM:",
+        room.id
+    );
+
+    console.log(
+        "QUESTION:",
+        room.currentQuestion + 1
+    );
+
+    console.log(
+        "TIMER:",
+        MATCH_QUESTION_TIME_MS / 1000,
+        "seconds"
+    );
+
+    console.log(
+        "================================="
+    );
+
+    /*
+     * Server-side timer.
+     *
+     * This automatically advances
+     * the room if not everyone answers.
+     */
+    room.questionTimer =
+        setTimeout(
+            function() {
+
+                /*
+                 * Room may have been deleted.
+                 */
+                if (
+                    !rooms.includes(room)
+                ) {
+                    return;
+                }
+
+                /*
+                 * Room may already have
+                 * advanced because everyone
+                 * answered.
+                 */
+                if (
+                    room.status !== "playing"
+                ) {
+                    return;
+                }
+
+                /*
+                 * Safety check.
+                 */
+                if (
+                    room.questionStartedAt === null
+                ) {
+                    return;
+                }
+
+                console.log(
+                    "MATCHMAKING TIMER EXPIRED:",
+                    room.id,
+                    "Question:",
+                    room.currentQuestion + 1
+                );
+
+                advanceRoomQuestion(
+                    room
+                );
+
+            },
+            MATCH_QUESTION_TIME_MS + 50
+        );
+}
+
+
+/* =========================
+   ADVANCE QUESTION
+========================= */
+
+function advanceRoomQuestion(room) {
+
+    if (!room) {
+        return;
+    }
+
+    if (
+        room.status === "finished"
+    ) {
+        return;
+    }
+
+    /*
+     * Stop the old question timer.
+     */
+    if (
+        room.questionTimer
+    ) {
+
+        clearTimeout(
+            room.questionTimer
+        );
+
+        room.questionTimer =
+            null;
+    }
+
+    /*
+     * Stop the old question.
+     */
+    room.questionStartedAt =
+        null;
+
+    /*
+     * Make sure the quiz exists.
+     */
+    if (
+        !room.quiz ||
+        !Array.isArray(
+            room.quiz.questions
+        )
+    ) {
+        room.status =
+            "finished";
+
+        return;
+    }
+
+    const lastQuestion =
+        room.currentQuestion >=
+        room.quiz.questions.length - 1;
+
+    /*
+     * FINAL QUESTION
+     */
+    if (
+        lastQuestion
+    ) {
+
+        room.status =
+            "finished";
+
+        console.log(
+            "================================="
+        );
+
+        console.log(
+            "MATCHMAKING FINISHED"
+        );
+
+        console.log(
+            "ROOM:",
+            room.id
+        );
+
+        console.log(
+            "================================="
+        );
+
+        return;
+    }
+
+    /*
+     * Move everyone to the next
+     * question together.
+     */
+    room.currentQuestion++;
+
+    /*
+     * New question starts with
+     * nobody ready.
+     */
+    room.questionReady[
+        room.currentQuestion
+    ] = {};
+
+    /*
+     * The next question is waiting
+     * for all players to receive it.
+     */
+    room.status =
+        "waiting_question";
+
+    console.log(
+        "================================="
+    );
+
+    console.log(
+        "MATCHMAKING NEXT QUESTION"
+    );
+
+    console.log(
+        "ROOM:",
+        room.id
+    );
+
+    console.log(
+        "QUESTION:",
+        room.currentQuestion + 1
+    );
+
+    console.log(
+        "Waiting for all players..."
+    );
+
+    console.log(
+        "================================="
+    );
+}
+
+
+/* =========================
+   GENERATE MATCH QUIZ
+========================= */
+
 async function generateRoomQuiz(room) {
 
-    if (room.quizStatus === "creating") {
+    if (
+        room.quizStatus === "creating"
+    ) {
 
         console.log(
             "Quiz is already being created for:",
@@ -1013,7 +1438,9 @@ async function generateRoomQuiz(room) {
         return;
     }
 
-    if (room.quizStatus === "ready") {
+    if (
+        room.quizStatus === "ready"
+    ) {
 
         console.log(
             "Quiz already exists for:",
@@ -1023,8 +1450,11 @@ async function generateRoomQuiz(room) {
         return;
     }
 
-    room.quizStatus = "creating";
-    room.status = "creating";
+    room.quizStatus =
+        "creating";
+
+    room.status =
+        "creating";
 
     console.log(
         "================================="
@@ -1049,9 +1479,20 @@ async function generateRoomQuiz(room) {
 
     try {
 
-        console.log("ROOM SUBJECT BEFORE AI:", room.subject);
-        console.log("ROOM ID:", room.id);
-        console.log("GENERATING QUIZ FOR:", room.subject);
+        console.log(
+            "ROOM SUBJECT BEFORE AI:",
+            room.subject
+        );
+
+        console.log(
+            "ROOM ID:",
+            room.id
+        );
+
+        console.log(
+            "GENERATING QUIZ FOR:",
+            room.subject
+        );
 
         const quiz =
             await createAIQuiz(
@@ -1060,16 +1501,45 @@ async function generateRoomQuiz(room) {
                 10
             );
 
-        room.quiz = quiz;
+        room.quiz =
+            quiz;
 
-        room.quizStatus = "ready";
+        room.quizStatus =
+            "ready";
 
-        room.quizError = null;
+        room.quizError =
+            null;
 
-        room.status = "starting";
+        /*
+         * Give the clients the existing
+         * 5-second countdown before the
+         * first question.
+         */
+        room.status =
+            "starting";
 
         room.startAt =
             Date.now() + 5000;
+
+        /*
+         * Reset all question state.
+         */
+        room.currentQuestion =
+            0;
+
+        room.answers =
+            {};
+
+        room.questionReady =
+            {
+                0: {}
+            };
+
+        room.questionStartedAt =
+            null;
+
+        room.questionTimer =
+            null;
 
         console.log(
             "================================="
@@ -1089,23 +1559,50 @@ async function generateRoomQuiz(room) {
         );
 
         console.log(
+            "First question will wait for all players."
+        );
+
+        console.log(
             "================================="
         );
 
-        setTimeout(function() {
+        /*
+         * Safety cleanup after 10 minutes.
+         */
+        setTimeout(
+            function() {
 
-            const index =
-                rooms.indexOf(room);
+                const index =
+                    rooms.indexOf(room);
 
-            if (index !== -1) {
+                if (
+                    index !== -1
+                ) {
 
-                rooms.splice(
-                    index,
-                    1
-                );
-            }
+                    /*
+                     * Stop any active timer.
+                     */
+                    if (
+                        room.questionTimer
+                    ) {
 
-        }, 10 * 60 * 1000);
+                        clearTimeout(
+                            room.questionTimer
+                        );
+
+                        room.questionTimer =
+                            null;
+                    }
+
+                    rooms.splice(
+                        index,
+                        1
+                    );
+                }
+
+            },
+            10 * 60 * 1000
+        );
 
     } catch (error) {
 
@@ -1114,14 +1611,21 @@ async function generateRoomQuiz(room) {
             error.message
         );
 
-        room.quizStatus = "error";
+        room.quizStatus =
+            "error";
 
         room.quizError =
             error.message;
 
-        room.status = "waiting";
+        room.status =
+            "waiting";
     }
 }
+
+
+/* =========================
+   CHECK ROOM START
+========================= */
 
 function checkRoomStart(room) {
 
@@ -1140,11 +1644,17 @@ function checkRoomStart(room) {
     const everyoneReady =
         room.players.every(
             function(player) {
-                return player.vote === true;
+
+                return (
+                    player.vote === true
+                );
+
             }
         );
 
-    if (!everyoneReady) {
+    if (
+        !everyoneReady
+    ) {
         return;
     }
 
@@ -1155,8 +1665,15 @@ function checkRoomStart(room) {
         return;
     }
 
-    generateRoomQuiz(room);
+    generateRoomQuiz(
+        room
+    );
 }
+
+
+/* =========================
+   JOIN / MATCHMAKE
+========================= */
 
 app.post(
     "/matchmaking/matchmake",
@@ -1192,7 +1709,7 @@ app.post(
             if (!room) {
 
                 room = {
-                
+
                     id:
                         "room_" +
                         Date.now() +
@@ -1200,39 +1717,65 @@ app.post(
                         Math.random()
                             .toString(36)
                             .slice(2),
-                
+
                     subject:
                         subject,
-                
+
                     size:
                         ROOM_SIZE,
-                
+
                     status:
                         "waiting",
-                
+
                     startAt:
                         null,
-                
+
                     quizStatus:
                         "waiting",
-                
+
                     quiz:
                         null,
-                
+
                     quizError:
                         null,
-                
+
                     currentQuestion:
                         0,
-                
+
+                    /*
+                     * Answers are stored
+                     * by question and player.
+                     */
                     answers:
                         {},
-                
+
+                    /*
+                     * Ready state is stored
+                     * by question and player.
+                     */
+                    questionReady:
+                        {},
+
+                    /*
+                     * Server timestamp for
+                     * the active question.
+                     */
+                    questionStartedAt:
+                        null,
+
+                    /*
+                     * Server timer handle.
+                     */
+                    questionTimer:
+                        null,
+
                     players:
                         []
                 };
 
-                rooms.push(room);
+                rooms.push(
+                    room
+                );
 
                 console.log(
                     "NEW ROOM:",
@@ -1240,20 +1783,37 @@ app.post(
                 );
             }
 
-            room.players.push({
+            /*
+             * Prevent duplicate players.
+             */
+            const existingPlayer =
+                room.players.find(
+                    function(player) {
+                        return (
+                            player.id === id
+                        );
+                    }
+                );
 
-                id:
-                    id,
+            if (
+                !existingPlayer
+            ) {
 
-                name:
-                    name,
+                room.players.push({
 
-                character:
-                    character,
+                    id:
+                        id,
 
-                vote:
-                    null
-            });
+                    name:
+                        name,
+
+                    character:
+                        character,
+
+                    vote:
+                        null
+                });
+            }
 
         } else {
 
@@ -1264,7 +1824,9 @@ app.post(
                     }
                 );
 
-            if (player) {
+            if (
+                player
+            ) {
 
                 player.name =
                     name;
@@ -1274,13 +1836,36 @@ app.post(
             }
         }
 
-        checkRoomStart(room);
+        /*
+         * If this is a newly joined player
+         * during a waiting-for-question state,
+         * make sure the ready object exists.
+         */
+        if (
+            !room.questionReady[
+                room.currentQuestion
+            ]
+        ) {
+
+            room.questionReady[
+                room.currentQuestion
+            ] = {};
+        }
+
+        checkRoomStart(
+            room
+        );
 
         res.json(
             roomData(room)
         );
     }
 );
+
+
+/* =========================
+   VOTE
+========================= */
 
 app.post(
     "/matchmaking/vote",
@@ -1317,17 +1902,15 @@ app.post(
             });
         }
 
+        /*
+         * Once the quiz has started,
+         * voting is locked.
+         */
         if (
-            room.status === "starting"
-        ) {
-
-            return res.json(
-                roomData(room)
-            );
-        }
-
-        if (
-            room.quizStatus === "creating"
+            room.status === "starting" ||
+            room.status === "creating" ||
+            room.status === "playing" ||
+            room.status === "waiting_question"
         ) {
 
             return res.json(
@@ -1338,13 +1921,151 @@ app.post(
         player.vote =
             vote === true;
 
-        checkRoomStart(room);
+        checkRoomStart(
+            room
+        );
 
         res.json(
             roomData(room)
         );
     }
 );
+
+
+/* =========================
+   QUESTION READY
+========================= */
+
+/*
+ * The frontend calls this after
+ * the current question has actually
+ * been rendered/received.
+ *
+ * The timer DOES NOT start until
+ * every player has called this.
+ */
+app.post(
+    "/matchmaking/question-ready",
+    (req, res) => {
+
+        const {
+            id
+        } = req.body;
+
+        const room =
+            findPlayerRoom(id);
+
+        if (!room) {
+
+            return res.status(404).json({
+                message:
+                    "Matchmaking room not found"
+            });
+        }
+
+        if (
+            room.quizStatus !== "ready"
+        ) {
+
+            return res.status(400).json({
+                message:
+                    "Quiz is not ready"
+            });
+        }
+
+        const player =
+            room.players.find(
+                function(p) {
+                    return p.id === id;
+                }
+            );
+
+        if (!player) {
+
+            return res.status(404).json({
+                message:
+                    "Player not found"
+            });
+        }
+
+        /*
+         * During the initial 5-second
+         * countdown, don't start the
+         * question yet.
+         */
+        if (
+            room.status === "starting"
+        ) {
+
+            if (
+                Date.now() <
+                room.startAt
+            ) {
+
+                return res.json(
+                    roomData(room)
+                );
+            }
+
+            room.status =
+                "waiting_question";
+        }
+
+        /*
+         * Only allow ready state for
+         * an active/current question.
+         */
+        if (
+            room.status !== "waiting_question" &&
+            room.status !== "playing"
+        ) {
+
+            return res.json(
+                roomData(room)
+            );
+        }
+
+        const questionIndex =
+            room.currentQuestion;
+
+        if (
+            !room.questionReady[
+                questionIndex
+            ]
+        ) {
+
+            room.questionReady[
+                questionIndex
+            ] = {};
+        }
+
+        /*
+         * Mark this player as having
+         * received the question.
+         */
+        room.questionReady[
+            questionIndex
+        ][id] =
+            true;
+
+        /*
+         * If everyone has received it,
+         * start the 10-second timer.
+         */
+        startRoomQuestion(
+            room
+        );
+
+        res.json(
+            roomData(room)
+        );
+    }
+);
+
+
+/* =========================
+   ANSWER
+========================= */
 
 app.post(
     "/matchmaking/answer",
@@ -1394,41 +2115,124 @@ app.post(
         const questionIndex =
             room.currentQuestion;
 
+        /*
+         * The question cannot be answered
+         * until the server has started it.
+         */
         if (
-            !room.answers[questionIndex]
+            room.status !== "playing" ||
+            room.questionStartedAt === null
         ) {
-            room.answers[questionIndex] = {};
+
+            return res.status(409).json({
+
+                message:
+                    "Question is not active",
+
+                room:
+                    roomData(room)
+            });
         }
 
-        room.answers[questionIndex][id] = {
-            answer: answer,
-            answered: true
+        /*
+         * Extra protection against a
+         * late answer arriving just after
+         * the 10-second timer.
+         */
+        if (
+            Date.now() -
+            room.questionStartedAt >=
+            MATCH_QUESTION_TIME_MS
+        ) {
+
+            advanceRoomQuestion(
+                room
+            );
+
+            return res.json(
+                roomData(room)
+            );
+        }
+
+        if (
+            !room.answers[
+                questionIndex
+            ]
+        ) {
+
+            room.answers[
+                questionIndex
+            ] = {};
+        }
+
+        /*
+         * IMPORTANT:
+         *
+         * One answer per player per
+         * question.
+         *
+         * This also prevents a player
+         * from changing their answer.
+         */
+        if (
+            room.answers[
+                questionIndex
+            ][id]
+        ) {
+
+            return res.json(
+                roomData(room)
+            );
+        }
+
+        room.answers[
+            questionIndex
+        ][id] = {
+
+            answer:
+                answer,
+
+            answered:
+                true
         };
 
         const answeredPlayers =
             Object.keys(
-                room.answers[questionIndex]
+                room.answers[
+                    questionIndex
+                ]
             ).length;
 
         const totalPlayers =
             room.players.length;
 
+        console.log(
+            "MATCH ANSWER:",
+            room.id,
+            "Question:",
+            questionIndex + 1,
+            "Answered:",
+            answeredPlayers + "/" + totalPlayers
+        );
+
+        /*
+         * If EVERYONE answered before
+         * the timer expired, immediately
+         * advance the whole room.
+         */
         if (
-            answeredPlayers >= totalPlayers
+            answeredPlayers >=
+            totalPlayers
         ) {
 
-            if (
-                room.currentQuestion <
-                room.quiz.questions.length - 1
-            ) {
+            console.log(
+                "ALL PLAYERS ANSWERED EARLY:",
+                room.id
+            );
 
-                room.currentQuestion++;
-
-            } else {
-
-                room.status =
-                    "finished";
-            }
+            advanceRoomQuestion(
+                room
+            );
         }
 
         res.json(
@@ -1436,6 +2240,11 @@ app.post(
         );
     }
 );
+
+
+/* =========================
+   LEAVE ROOM
+========================= */
 
 app.post(
     "/matchmaking/leave",
@@ -1456,25 +2265,116 @@ app.post(
             });
         }
 
+        /*
+         * Remove player.
+         */
         room.players =
             room.players.filter(
                 function(player) {
-                    return player.id !== id;
+
+                    return (
+                        player.id !== id
+                    );
+
                 }
             );
 
+        /*
+         * Remove their ready state
+         * from the current question.
+         */
+        if (
+            room.questionReady[
+                room.currentQuestion
+            ]
+        ) {
+
+            delete room.questionReady[
+                room.currentQuestion
+            ][id];
+        }
+
+        /*
+         * If nobody remains,
+         * completely remove the room.
+         */
         if (
             room.players.length === 0
         ) {
 
+            if (
+                room.questionTimer
+            ) {
+
+                clearTimeout(
+                    room.questionTimer
+                );
+
+                room.questionTimer =
+                    null;
+            }
+
             const index =
                 rooms.indexOf(room);
 
-            if (index !== -1) {
+            if (
+                index !== -1
+            ) {
 
                 rooms.splice(
                     index,
                     1
+                );
+            }
+
+            return res.json({
+                message:
+                    "Left matchmaking room"
+            });
+        }
+
+        /*
+         * If someone left while the
+         * current question was waiting
+         * for everyone to be ready,
+         * re-check the condition.
+         */
+        if (
+            room.status === "waiting_question"
+        ) {
+
+            startRoomQuestion(
+                room
+            );
+        }
+
+        /*
+         * If someone left after the
+         * question started, we should
+         * check whether the remaining
+         * players have all answered.
+         */
+        if (
+            room.status === "playing"
+        ) {
+
+            const answers =
+                room.answers[
+                    room.currentQuestion
+                ] || {};
+
+            const answeredPlayers =
+                Object.keys(
+                    answers
+                ).length;
+
+            if (
+                answeredPlayers >=
+                room.players.length
+            ) {
+
+                advanceRoomQuestion(
+                    room
                 );
             }
         }
@@ -1485,6 +2385,7 @@ app.post(
         });
     }
 );
+
 
 /* =========================
    SERVER
@@ -1507,6 +2408,12 @@ app.listen(
 
         console.log(
             `Matchmaking endpoint: POST /matchmaking/matchmake`
+        );
+
+        console.log(
+            `Matchmaking question timer: ${
+                MATCH_QUESTION_TIME_MS / 1000
+            } seconds`
         );
     }
 );
