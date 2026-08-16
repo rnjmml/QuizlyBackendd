@@ -38,6 +38,12 @@ app.get("/test-version", (req, res) => {
     });
 });
 
+app.post("/test-post", (req, res) => {
+    res.json({
+        message: "POST routes are working"
+    });
+});
+
 /* =========================
    AI QUIZ
 ========================= */
