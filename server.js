@@ -526,6 +526,177 @@ app.post("/profile/:id/awards", async (req, res) => {
    SERVER
 ========================= */
 
+const rooms = [];
+const ROOM_SIZE = 4;
+
+function findPlayerRoom(id) {
+    for (const room of rooms) {
+        if (room.players.some(p => p.id === id)) {
+            return room;
+        }
+    }
+    return null;
+}
+
+function findRoom(subject) {
+    for (const room of rooms) {
+        if (
+            room.subject === subject &&
+            room.status === "waiting" &&
+            room.players.length < ROOM_SIZE
+        ) {
+            return room;
+        }
+    }
+    return null;
+}
+
+function roomData(room) {
+    return {
+        id: room.id,
+        subject: room.subject,
+        size: room.size,
+        status: room.status,
+        countdownMs: room.status === "starting"
+            ? Math.max(0, room.startAt - Date.now())
+            : null,
+        count: room.players.length,
+        players: room.players
+    };
+}
+
+function checkRoomStart(room) {
+    if (room.status !== "waiting") return;
+
+    if (room.players.length === 0) return;
+
+    const everyoneReady = room.players.every(function(player) {
+        return player.vote === true;
+    });
+
+    if (everyoneReady) {
+        room.status = "starting";
+        room.startAt = Date.now() + 5000;
+
+        setTimeout(function() {
+            const index = rooms.indexOf(room);
+
+            if (index !== -1) {
+                rooms.splice(index, 1);
+            }
+        }, 6000);
+    }
+}
+
+app.post("/matchmaking/matchmake", (req, res) => {
+    const { id, name, character, subject } = req.body;
+
+    if (!id || !name || !subject) {
+        return res.status(400).json({
+            message: "Missing matchmaking information"
+        });
+    }
+
+    let room = findPlayerRoom(id);
+
+    if (!room) {
+        room = findRoom(subject);
+
+        if (!room) {
+            room = {
+                id: "room_" + Date.now() + "_" + Math.random().toString(36).slice(2),
+                subject: subject,
+                size: ROOM_SIZE,
+                status: "waiting",
+                startAt: null,
+                players: []
+            };
+
+            rooms.push(room);
+        }
+
+        room.players.push({
+            id: id,
+            name: name,
+            character: character,
+            vote: null
+        });
+    } else {
+        const player = room.players.find(function(p) {
+            return p.id === id;
+        });
+
+        if (player) {
+            player.name = name;
+            player.character = character;
+        }
+    }
+
+    checkRoomStart(room);
+
+    res.json(roomData(room));
+});
+
+app.post("/matchmaking/vote", (req, res) => {
+    const { id, vote } = req.body;
+
+    const room = findPlayerRoom(id);
+
+    if (!room) {
+        return res.status(404).json({
+            message: "Matchmaking room not found"
+        });
+    }
+
+    if (room.status === "starting") {
+        return res.json(roomData(room));
+    }
+
+    const player = room.players.find(function(p) {
+        return p.id === id;
+    });
+
+    if (!player) {
+        return res.status(404).json({
+            message: "Player not found"
+        });
+    }
+
+    player.vote = vote === true;
+
+    checkRoomStart(room);
+
+    res.json(roomData(room));
+});
+
+app.post("/matchmaking/leave", (req, res) => {
+    const { id } = req.body;
+
+    const room = findPlayerRoom(id);
+
+    if (!room) {
+        return res.json({
+            message: "Player was not in a room"
+        });
+    }
+
+    room.players = room.players.filter(function(player) {
+        return player.id !== id;
+    });
+
+    if (room.players.length === 0) {
+        const index = rooms.indexOf(room);
+
+        if (index !== -1) {
+            rooms.splice(index, 1);
+        }
+    }
+
+    res.json({
+        message: "Left matchmaking room"
+    });
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
