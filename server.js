@@ -35,6 +35,66 @@ app.get("/health", (req, res) => {
    AI QUIZ
 ========================= */
 
+app.get("/test-ai", async (req, res) => {
+    try {
+        console.log("TESTING OPENROUTER");
+
+        const response = await axios.post(
+            OPENROUTER_URL,
+            {
+                model: AI_MODEL,
+                messages: [
+                    {
+                        role: "user",
+                        content: "Reply with exactly: AI TEST WORKS"
+                    }
+                ],
+                max_tokens: 20
+            },
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
+                },
+                timeout: 60000
+            }
+        );
+
+        console.log("OPENROUTER TEST SUCCESS");
+        console.log(response.data);
+
+        res.json({
+            success: true,
+            response: response.data
+        });
+
+    } catch (error) {
+
+        console.log("OPENROUTER TEST FAILED");
+
+        if (error.response) {
+            console.log("STATUS:", error.response.status);
+            console.log(
+                "DATA:",
+                JSON.stringify(error.response.data, null, 2)
+            );
+
+            return res.status(502).json({
+                success: false,
+                status: error.response.status,
+                error: error.response.data
+            });
+        }
+
+        console.log("ERROR:", error.message);
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 app.post("/quiz", async (req, res) => {
     console.log("QUIZ REQUEST RECEIVED");
     console.log(req.body);
@@ -239,21 +299,21 @@ Rules:
         console.log("AI QUIZ ERROR");
 
         if (error.response) {
-            console.log("Status:", error.response.status);
-            console.log("Data:", error.response.data);
-
+            console.log("OPENROUTER STATUS:", error.response.status);
+            console.log("OPENROUTER DATA:", JSON.stringify(error.response.data, null, 2));
+        
             return res.status(502).json({
-                message: "Unable to create the quiz.",
-                error: error.response.data?.error?.message ||
-                       error.response.data?.message ||
-                       "OpenRouter request failed."
+                message: "OpenRouter request failed.",
+                status: error.response.status,
+                error: error.response.data
             });
         }
-
-        console.log("Error:", error.message);
-
+        
+        console.log("OPENROUTER CONNECTION ERROR:", error.message);
+        console.log("FULL ERROR:", error);
+        
         return res.status(500).json({
-            message: "Unable to create the quiz.",
+            message: "Could not connect to OpenRouter.",
             error: error.message
         });
     }
