@@ -192,19 +192,33 @@ Rules:
         }
 
         const questions = quiz.questions
-            .filter(q =>
-                q &&
-                typeof q.question === "string" &&
-                Array.isArray(q.options) &&
-                q.options.length === 4 &&
-                typeof q.answer === "string"
-            )
+            .filter(q => {
+                if (
+                    !q ||
+                    typeof q.question !== "string" ||
+                    !Array.isArray(q.options) ||
+                    q.options.length !== 4 ||
+                    typeof q.answer !== "string"
+                ) {
+                    return false;
+                }
+        
+                const answer = q.answer.trim().toLowerCase();
+        
+                return q.options.some(function(option) {
+                    return String(option).trim().toLowerCase() === answer;
+                });
+            })
             .slice(0, count)
             .map(q => ({
-                question: q.question,
-                options: q.options,
-                answer: q.answer,
-                explanation: q.explanation || ""
+                question: q.question.trim(),
+                options: q.options.map(function(option) {
+                    return String(option).trim();
+                }),
+                answer: q.answer.trim(),
+                explanation: q.explanation
+                    ? String(q.explanation).trim()
+                    : ""
             }));
 
         if (questions.length === 0) {
