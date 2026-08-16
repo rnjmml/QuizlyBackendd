@@ -960,18 +960,27 @@ function findPlayerRoom(id) {
 
 function findRoom(subject) {
 
+    let best = null;
+    
     for (const room of rooms) {
 
         if (
             room.subject === subject &&
-            room.status === "waiting" &&
+            room.status !== "active" &&
+            room.status !== "finished" &&
             room.players.length < ROOM_SIZE
         ) {
-            return room;
+            if (
+                !best || 
+                room.players.length >
+                    best.players.length
+            ) {
+                best = room;
+            } 
         }
     }
 
-    return null;
+    return best;
 }
 
 function roomData(room) {
@@ -1468,6 +1477,95 @@ currentQuestion:
             }
         }
 
+        if (
+   room.status === "waiting" &&
+   room.players.length < ROOM_SIZE
+) {
+
+
+   const better =
+       findRoom(subject);
+
+
+   if (
+       better &&
+       better.id !== room.id &&
+       better.players.length >
+           room.players.length
+   ) {
+
+
+       const player =
+           room.players.find(
+               function(p) {
+                   return p.id === id;
+               }
+           );
+
+
+       if (player) {
+
+
+           room.players =
+               room.players.filter(
+                   function(p) {
+                       return p.id !== id;
+                   }
+               );
+
+
+           if (room.players.length === 0) {
+
+
+               const index =
+                   rooms.indexOf(room);
+
+
+               if (index !== -1) {
+
+
+                   rooms.splice(
+                       index,
+                       1
+                   );
+               }
+           }
+
+
+           player.vote = null;
+
+
+           better.players.push(player);
+
+
+           room = better;
+
+           if (
+               room.quizStatus === "creating" ||
+               room.quizStatus === "ready"
+            ) {
+
+               console.log(
+                   "MERGED PLAYER INTO ACTIVE GENERATION"
+                   room.id
+               );
+           }
+           
+           console.log(
+               "PLAYER MOVED TO FULLER ROOM:",
+               room.id,
+
+               "status",
+               room.status,
+
+               "quizStatus"
+               room.quizStatus
+            );
+
+       }
+   }
+}
+        
         checkRoomStart(room);
 
         checkQuestionTimer(room);
