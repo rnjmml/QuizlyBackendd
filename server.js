@@ -958,6 +958,8 @@ function roomData(room) {
         quizStatus:
             room.quizStatus,
 
+        currentQuestion:
+            room.currentQuestion,
         countdownMs:
             room.status === "starting"
                 ? Math.max(
@@ -1170,7 +1172,7 @@ app.post(
             if (!room) {
 
                 room = {
-
+                
                     id:
                         "room_" +
                         Date.now() +
@@ -1178,28 +1180,34 @@ app.post(
                         Math.random()
                             .toString(36)
                             .slice(2),
-
+                
                     subject:
                         subject,
-
+                
                     size:
                         ROOM_SIZE,
-
+                
                     status:
                         "waiting",
-
+                
                     startAt:
                         null,
-
+                
                     quizStatus:
                         "waiting",
-
+                
                     quiz:
                         null,
-
+                
                     quizError:
                         null,
-
+                
+                    currentQuestion:
+                        0,
+                
+                    answers:
+                        {},
+                
                     players:
                         []
                 };
@@ -1255,12 +1263,12 @@ app.post(
 );
 
 app.post(
-    "/matchmaking/vote",
+    "/matchmaking/answer",
     async (req, res) => {
 
         const {
             id,
-            vote
+            answer
         } = req.body;
 
         const room =
@@ -1271,6 +1279,16 @@ app.post(
             return res.status(404).json({
                 message:
                     "Matchmaking room not found"
+            });
+        }
+
+        if (
+            room.quizStatus !== "ready"
+        ) {
+
+            return res.status(400).json({
+                message:
+                    "Quiz is not ready"
             });
         }
 
@@ -1289,28 +1307,45 @@ app.post(
             });
         }
 
-        if (
-            room.status === "starting"
-        ) {
-
-            return res.json(
-                roomData(room)
-            );
-        }
+        const questionIndex =
+            room.currentQuestion;
 
         if (
-            room.quizStatus === "creating"
+            !room.answers[questionIndex]
         ) {
-
-            return res.json(
-                roomData(room)
-            );
+            room.answers[questionIndex] = {};
         }
 
-        player.vote =
-            vote === true;
+        room.answers[questionIndex][id] = {
+            answer: answer,
+            answered: true
+        };
 
-        checkRoomStart(room);
+        const answeredPlayers =
+            Object.keys(
+                room.answers[questionIndex]
+            ).length;
+
+        const totalPlayers =
+            room.players.length;
+
+        if (
+            answeredPlayers >= totalPlayers
+        ) {
+
+            if (
+                room.currentQuestion <
+                room.quiz.questions.length - 1
+            ) {
+
+                room.currentQuestion++;
+
+            } else {
+
+                room.status =
+                    "finished";
+            }
+        }
 
         res.json(
             roomData(room)
