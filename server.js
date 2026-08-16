@@ -35,25 +35,199 @@ app.get("/health", (req, res) => {
    AI QUIZ
 ========================= */
 
-function cleanAIResponse(content) {
-    let cleaned = String(content || "").trim();
+const quizSchema = {
+    type: "object",
+    properties: {
+        questions: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    question: {
+                        type: "string"
+                    },
+                    options: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        minItems: 4,
+                        maxItems: 4
+                    },
+                    answer: {
+                        type: "string"
+                    },
+                    explanation: {
+                        type: "string"
+                    }
+                },
+                required: [
+                    "question",
+                    "options",
+                    "answer",
+                    "explanation"
+                ],
+                additionalProperties: false
+            }
+        }
+    },
+    required: ["questions"],
+    additionalProperties: false
+};
 
-    cleaned = cleaned
-        .replace(/```json/gi, "")
-        .replace(/```/g, "")
-        .trim();
-
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
-
-    if (firstBrace !== -1 && lastBrace !== -1) {
-        cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+function extractJson(content) {
+    if (!content) {
+        return null;
     }
 
-    return cleaned;
+    if (typeof content !== "string") {
+        return null;
+    }
+
+    let text = content.trim();
+
+    text = text.replace(/```json/gi, "");
+    text = text.replace(/```/g, "");
+    text = text.trim();
+
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+    }
+
+    const start = text.indexOf("{");
+
+    if (start === -1) {
+        return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < text.length; i++) {
+        const char = text[i];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+
+        if (char === "\\") {
+            escaped = true;
+            continue;
+        }
+
+        if (char === '"' && !escaped) {
+            inString = !inString;
+            continue;
+        }
+
+        if (inString) {
+            continue;
+        }
+
+        if (char === "{") {
+            depth++;
+        }
+
+        if (char === "}") {
+            depth--;
+
+            if (depth === 0) {
+                const possibleJson = text.substring(start, i + 1);
+
+                try {
+                    return JSON.parse(possibleJson);
+                } catch (error) {
+                    return null;
+                }
+            }
+        }
+    }
+
+    return null;
 }
 
-async function createAIQuiz(subject, mode, questionCount = 10) {
+function validateQuiz(quiz, count) {
+    if (!quiz) {
+        return null;
+    }
+
+    if (!quiz.questions || !Array.isArray(quiz.questions)) {
+        return null;
+    }
+
+    if (quiz.questions.length < count) {
+        console.log(
+            `AI returned ${quiz.questions.length} questions instead of ${count}`
+        );
+
+        return null;
+    }
+
+    const questions = quiz.questions
+        .slice(0, count)
+        .filter(function(q) {
+
+            if (!q) {
+                return false;
+            }
+
+            if (typeof q.question !== "string") {
+                return false;
+            }
+
+            if (!Array.isArray(q.options)) {
+                return false;
+            }
+
+            if (q.options.length !== 4) {
+                return false;
+            }
+
+            if (typeof q.answer !== "string") {
+                return false;
+            }
+
+            const answer = q.answer.trim().toLowerCase();
+
+            const validAnswer = q.options.some(function(option) {
+                return String(option).trim().toLowerCase() === answer;
+            });
+
+            return validAnswer;
+        })
+        .map(function(q) {
+
+            return {
+                question: q.question.trim(),
+
+                options: q.options.map(function(option) {
+                    return String(option).trim();
+                }),
+
+                answer: q.answer.trim(),
+
+                explanation: q.explanation
+                    ? String(q.explanation).trim()
+                    : ""
+            };
+        });
+
+    if (questions.length !== count) {
+        console.log(
+            `Only ${questions.length} valid questions were received`
+        );
+
+        return null;
+    }
+
+    return questions;
+}
+
+async function createAIQuiz(subject, mode, questionCount) {
+
     if (!process.env.OPENROUTER_API_KEY) {
         throw new Error("OPENROUTER_API_KEY is missing");
     }
@@ -75,8 +249,7 @@ async function createAIQuiz(subject, mode, questionCount = 10) {
     };
 
     const topic =
-        subjectRules[subject] ||
-        subjectRules.English;
+        subjectRules[subject] || subjectRules.English;
 
     const difficulty =
         mode === "Compete"
@@ -94,216 +267,173 @@ Difficulty: ${difficulty}
 The questions must focus on:
 ${topic}
 
-Return ONLY valid JSON.
+Create exactly ${count} multiple-choice questions.
 
-The JSON must have exactly this structure:
-
-{
-  "questions": [
-    {
-      "question": "Question text",
-      "options": [
-        "Option A",
-        "Option B",
-        "Option C",
-        "Option D"
-      ],
-      "answer": "The exact correct option text",
-      "explanation": "Short explanation of why the answer is correct"
-    }
-  ]
-}
+Every question must have:
+- exactly 4 options
+- exactly 1 correct answer
+- an answer that exactly matches one of the options
+- a short explanation
 
 Rules:
-- Create exactly ${count} questions.
-- Every question must have exactly 4 options.
-- Only one option may be correct.
-- The answer must exactly match one of the four options.
+- Do not repeat questions.
 - Do not use "All of the above".
 - Do not use "None of the above".
-- Do not repeat questions.
-- Keep questions appropriate for students.
-- Keep explanations short and easy to understand.
-- Do not include markdown.
-- Do not include code fences.
-- Do not include anything outside the JSON object.
+- Keep the questions appropriate for students.
+- Keep explanations short.
+- Do not add any text outside the JSON response.
 `;
 
     console.log("=================================");
     console.log("CREATING AI QUIZ");
+    console.log("Model:", AI_MODEL);
     console.log("Subject:", subject);
     console.log("Mode:", mode);
     console.log("Questions:", count);
-    console.log("Model:", AI_MODEL);
     console.log("=================================");
 
-    const response = await axios.post(
-        OPENROUTER_URL,
-        {
-            model: AI_MODEL,
+    try {
 
-            messages: [
-                {
-                    role: "system",
-                    content:
-                        "You create accurate educational multiple-choice quizzes. Return valid JSON only."
+        const response = await axios.post(
+            OPENROUTER_URL,
+            {
+                model: AI_MODEL,
+
+                messages: [
+                    {
+                        role: "system",
+                        content:
+                            "You create accurate educational multiple-choice quizzes. Return only JSON that follows the requested schema."
+                    },
+                    {
+                        role: "user",
+                        content: prompt
+                    }
+                ],
+
+                response_format: {
+                    type: "json_schema",
+                    json_schema: {
+                        name: "quiz",
+                        strict: true,
+                        schema: quizSchema
+                    }
                 },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ],
 
-            temperature: 0.4,
-            max_tokens: 5000
-        },
-        {
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization":
-                    `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "HTTP-Referer":
-                    "https://quizlybackendd.onrender.com",
-                "X-Title": "QuiZly"
+                plugins: [
+                    {
+                        id: "response-healing"
+                    }
+                ],
+
+                provider: {
+                    require_parameters: true
+                },
+
+                temperature: 0.3,
+
+                max_tokens: 5000
             },
+            {
+                headers: {
+                    "Content-Type": "application/json",
 
-            timeout: 120000
-        }
-    );
+                    "Authorization":
+                        `Bearer ${process.env.OPENROUTER_API_KEY}`,
 
-    const content =
-        response.data?.choices?.[0]?.message?.content;
+                    "HTTP-Referer":
+                        "https://quizlybackendd.onrender.com",
 
-    console.log("AI RESPONSE RECEIVED");
+                    "X-Title":
+                        "QuiZly"
+                },
 
-    if (!content) {
-        console.log(response.data);
-
-        throw new Error(
-            "The AI did not return any content."
-        );
-    }
-
-    console.log("RAW AI CONTENT:");
-    console.log(content);
-
-    const cleaned = cleanAIResponse(content);
-
-    let quiz;
-
-    try {
-        quiz = JSON.parse(cleaned);
-    } catch (error) {
-        console.log("JSON PARSE ERROR");
-        console.log("CLEANED RESPONSE:");
-        console.log(cleaned);
-
-        throw new Error(
-            "The AI returned an invalid quiz format."
-        );
-    }
-
-    if (
-        !quiz ||
-        !quiz.questions ||
-        !Array.isArray(quiz.questions)
-    ) {
-        throw new Error(
-            "The AI response does not contain questions."
-        );
-    }
-
-    const questions = quiz.questions
-        .filter(function(q) {
-            if (
-                !q ||
-                typeof q.question !== "string" ||
-                !Array.isArray(q.options) ||
-                q.options.length !== 4 ||
-                typeof q.answer !== "string"
-            ) {
-                return false;
+                timeout: 60000
             }
-
-            const answer =
-                q.answer.trim().toLowerCase();
-
-            const validAnswer =
-                q.options.some(function(option) {
-                    return (
-                        String(option)
-                            .trim()
-                            .toLowerCase() === answer
-                    );
-                });
-
-            return validAnswer;
-        })
-        .slice(0, count)
-        .map(function(q) {
-            return {
-                question: q.question.trim(),
-
-                options: q.options.map(function(option) {
-                    return String(option).trim();
-                }),
-
-                answer: q.answer.trim(),
-
-                explanation: q.explanation
-                    ? String(q.explanation).trim()
-                    : ""
-            };
-        });
-
-    if (questions.length < count) {
-        throw new Error(
-            `The AI only created ${questions.length} valid questions out of ${count}.`
-        );
-    }
-
-    console.log(
-        `AI QUIZ CREATED: ${questions.length} QUESTIONS`
-    );
-
-    return {
-        subject: subject,
-        mode: mode,
-        questions: questions
-    };
-}
-
-
-/* =========================
-   TEST AI
-========================= */
-
-app.get("/test-ai", async (req, res) => {
-    try {
-        console.log("TESTING OPENROUTER");
-
-        const quiz = await createAIQuiz(
-            "English",
-            "Study",
-            5
         );
 
-        res.json({
-            success: true,
-            quiz: quiz
-        });
+        console.log("OpenRouter status:", response.status);
+        console.log("OpenRouter model:", response.data?.model);
+
+        const message = response.data?.choices?.[0]?.message;
+
+        if (!message) {
+            throw new Error(
+                "OpenRouter did not return a message."
+            );
+        }
+
+        let content = message.content;
+
+        if (Array.isArray(content)) {
+
+            content = content
+                .filter(function(item) {
+                    return item && item.type === "text";
+                })
+                .map(function(item) {
+                    return item.text || "";
+                })
+                .join("");
+        }
+
+        console.log("AI response received.");
+
+        const quiz = extractJson(content);
+
+        if (!quiz) {
+
+            console.log("INVALID AI JSON");
+            console.log("RAW AI RESPONSE:");
+            console.log(content);
+
+            throw new Error(
+                "The AI returned an invalid quiz format."
+            );
+        }
+
+        const questions = validateQuiz(
+            quiz,
+            count
+        );
+
+        if (!questions) {
+
+            console.log("AI QUIZ VALIDATION FAILED");
+
+            throw new Error(
+                "The AI did not return the required number of valid questions."
+            );
+        }
+
+        console.log(
+            `AI quiz successfully created with ${questions.length} questions.`
+        );
+
+        return {
+            subject: subject,
+            mode: mode,
+            questions: questions
+        };
 
     } catch (error) {
-        console.log("OPENROUTER TEST FAILED");
+
+        console.log("=================================");
+        console.log("AI QUIZ ERROR");
+        console.log("=================================");
 
         if (error.response) {
+
             console.log(
-                "STATUS:",
+                "OpenRouter status:",
                 error.response.status
             );
 
             console.log(
-                "DATA:",
+                "OpenRouter response:"
+            );
+
+            console.log(
                 JSON.stringify(
                     error.response.data,
                     null,
@@ -311,33 +441,32 @@ app.get("/test-ai", async (req, res) => {
                 )
             );
 
-            return res.status(502).json({
-                success: false,
-                status: error.response.status,
-                error: error.response.data
-            });
+            throw new Error(
+                error.response.data?.error?.message ||
+                error.response.data?.message ||
+                "OpenRouter request failed."
+            );
         }
 
         console.log(
-            "ERROR:",
+            "Error:",
             error.message
         );
 
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        throw error;
     }
-});
+}
 
+/*
+   This endpoint is still available for Study mode.
 
-/* =========================
-   NORMAL AI QUIZ
-========================= */
+   IMPORTANT:
+   Matchmaking should NOT use this endpoint.
+*/
 
 app.post("/quiz", async (req, res) => {
+
     console.log("QUIZ REQUEST RECEIVED");
-    console.log(req.body);
 
     const {
         subject = "English",
@@ -346,6 +475,7 @@ app.post("/quiz", async (req, res) => {
     } = req.body;
 
     try {
+
         const quiz = await createAIQuiz(
             subject,
             mode,
@@ -355,53 +485,25 @@ app.post("/quiz", async (req, res) => {
         res.status(200).json(quiz);
 
     } catch (error) {
-        console.log("AI QUIZ ERROR");
-
-        if (error.response) {
-            console.log(
-                "OPENROUTER STATUS:",
-                error.response.status
-            );
-
-            console.log(
-                "OPENROUTER DATA:",
-                JSON.stringify(
-                    error.response.data,
-                    null,
-                    2
-                )
-            );
-
-            return res.status(502).json({
-                message:
-                    "OpenRouter request failed.",
-                status:
-                    error.response.status,
-                error:
-                    error.response.data
-            });
-        }
 
         console.log(
-            "ERROR:",
+            "QUIZ CREATION FAILED:",
             error.message
         );
 
-        return res.status(502).json({
-            message:
-                "Could not create quiz.",
-            error:
-                error.message
+        res.status(502).json({
+            message: "Could not create quiz.",
+            error: error.message
         });
     }
 });
-
 
 /* =========================
    DATABASE
 ========================= */
 
 async function findUser(field, value) {
+
     const response = await axios.get(
         `${DB_BASE}?${field}=${encodeURIComponent(value)}`,
         {
@@ -419,6 +521,7 @@ async function findUser(field, value) {
 }
 
 function publicProfile(user) {
+
     return {
         id: user._id,
         username: user.username,
@@ -429,17 +532,9 @@ function publicProfile(user) {
     };
 }
 
-
-/* =========================
-   REGISTER
-========================= */
-
 app.post("/register", async (req, res) => {
-    console.log(
-        "REGISTER REQUEST RECEIVED"
-    );
 
-    console.log(req.body);
+    console.log("REGISTER REQUEST RECEIVED");
 
     const {
         username,
@@ -448,13 +543,14 @@ app.post("/register", async (req, res) => {
     } = req.body;
 
     if (!username || !email || !password) {
+
         return res.status(400).json({
-            message:
-                "Please fill in all fields"
+            message: "Please fill in all fields"
         });
     }
 
     try {
+
         const existing =
             await findUser(
                 "username",
@@ -462,9 +558,9 @@ app.post("/register", async (req, res) => {
             );
 
         if (existing) {
+
             return res.status(409).json({
-                message:
-                    "Username already taken"
+                message: "Username already taken"
             });
         }
 
@@ -495,11 +591,11 @@ app.post("/register", async (req, res) => {
         });
 
     } catch (error) {
-        console.log(
-            "DATABASE ERROR"
-        );
+
+        console.log("DATABASE ERROR");
 
         if (error.response) {
+
             console.log(
                 "Status:",
                 error.response.status
@@ -509,7 +605,9 @@ app.post("/register", async (req, res) => {
                 "Data:",
                 error.response.data
             );
+
         } else {
+
             console.log(
                 "Error:",
                 error.message
@@ -517,21 +615,14 @@ app.post("/register", async (req, res) => {
         }
 
         res.status(500).json({
-            message:
-                "Server error"
+            message: "Server error"
         });
     }
 });
 
-
-/* =========================
-   LOGIN
-========================= */
-
 app.post("/login", async (req, res) => {
-    console.log(
-        "LOGIN REQUEST RECEIVED"
-    );
+
+    console.log("LOGIN REQUEST RECEIVED");
 
     const {
         username,
@@ -539,6 +630,7 @@ app.post("/login", async (req, res) => {
     } = req.body;
 
     if (!username || !password) {
+
         return res.status(400).json({
             message:
                 "Please enter your username and password."
@@ -546,6 +638,7 @@ app.post("/login", async (req, res) => {
     }
 
     try {
+
         const user =
             await findUser(
                 "username",
@@ -556,6 +649,7 @@ app.post("/login", async (req, res) => {
             !user ||
             user.password !== password
         ) {
+
             return res.status(401).json({
                 message:
                     "Incorrect username or password"
@@ -571,11 +665,11 @@ app.post("/login", async (req, res) => {
         });
 
     } catch (error) {
-        console.log(
-            "DATABASE ERROR"
-        );
+
+        console.log("DATABASE ERROR");
 
         if (error.response) {
+
             console.log(
                 "Status:",
                 error.response.status
@@ -585,7 +679,9 @@ app.post("/login", async (req, res) => {
                 "Data:",
                 error.response.data
             );
+
         } else {
+
             console.log(
                 "Error:",
                 error.message
@@ -593,31 +689,31 @@ app.post("/login", async (req, res) => {
         }
 
         res.status(500).json({
-            message:
-                "Server error"
+            message: "Server error"
         });
     }
 });
-
 
 /* =========================
    PROFILE
 ========================= */
 
 async function getUserById(id) {
+
     try {
+
         const response =
             await axios.get(
                 `${DB_BASE}/${id}`,
                 {
-                    headers:
-                        dbHeaders()
+                    headers: dbHeaders()
                 }
             );
 
         return response.data;
 
     } catch (error) {
+
         if (
             error.response &&
             error.response.status === 404
@@ -630,139 +726,130 @@ async function getUserById(id) {
 }
 
 async function updateUser(id, fields) {
+
     const response =
         await axios.patch(
             `${DB_BASE}/${id}`,
             fields,
             {
-                headers:
-                    dbHeaders()
+                headers: dbHeaders()
             }
         );
 
     return response.data;
 }
 
+app.get("/profile/:id", async (req, res) => {
 
-app.get(
-    "/profile/:id",
-    async (req, res) => {
-        try {
-            const user =
-                await getUserById(
-                    req.params.id
-                );
+    try {
 
-            if (!user) {
-                return res.status(404).json({
-                    message:
-                        "Profile not found"
-                });
-            }
-
-            res.status(200).json({
-                profile:
-                    publicProfile(user)
-            });
-
-        } catch (error) {
-            console.log(
-                "DATABASE ERROR",
-                error.message
+        const user =
+            await getUserById(
+                req.params.id
             );
 
-            res.status(500).json({
-                message:
-                    "Server error"
+        if (!user) {
+
+            return res.status(404).json({
+                message: "Profile not found"
             });
         }
+
+        res.status(200).json({
+            profile:
+                publicProfile(user)
+        });
+
+    } catch (error) {
+
+        console.log(
+            "DATABASE ERROR",
+            error.message
+        );
+
+        res.status(500).json({
+            message: "Server error"
+        });
     }
-);
+});
 
+app.patch("/profile/:id", async (req, res) => {
 
-app.patch(
-    "/profile/:id",
-    async (req, res) => {
-        const {
-            characterId
-        } = req.body;
+    const {
+        characterId
+    } = req.body;
 
-        try {
-            const user =
-                await getUserById(
-                    req.params.id
-                );
+    try {
 
-            if (!user) {
-                return res.status(404).json({
-                    message:
-                        "Profile not found"
-                });
-            }
-
-            const characters =
-                user.characters || [];
-
-            if (
-                characterId &&
-                !characters.includes(
-                    characterId
-                )
-            ) {
-                characters.push(
-                    characterId
-                );
-            }
-
-            const updated =
-                await updateUser(
-                    req.params.id,
-                    {
-                        characters:
-                            characters
-                    }
-                );
-
-            res.status(200).json({
-                message:
-                    "Profile updated",
-
-                profile:
-                    publicProfile(
-                        updated
-                    )
-            });
-
-        } catch (error) {
-            console.log(
-                "PATCH ERROR",
-                error.message
+        const user =
+            await getUserById(
+                req.params.id
             );
 
-            res.status(500).json({
-                message:
-                    "Server error"
+        if (!user) {
+
+            return res.status(404).json({
+                message: "Profile not found"
             });
         }
-    }
-);
 
+        const characters =
+            user.characters || [];
+
+        if (
+            characterId &&
+            !characters.includes(characterId)
+        ) {
+            characters.push(characterId);
+        }
+
+        const updated =
+            await updateUser(
+                req.params.id,
+                {
+                    characters
+                }
+            );
+
+        res.status(200).json({
+            message:
+                "Profile updated",
+
+            profile:
+                publicProfile(updated)
+        });
+
+    } catch (error) {
+
+        console.log(
+            "PATCH ERROR",
+            error.message
+        );
+
+        res.status(500).json({
+            message: "Server error"
+        });
+    }
+});
 
 app.post(
     "/profile/:id/awards",
     async (req, res) => {
+
         const {
             stars = 0,
             characterId
         } = req.body;
 
         try {
+
             const user =
                 await getUserById(
                     req.params.id
                 );
 
             if (!user) {
+
                 return res.status(404).json({
                     message:
                         "Profile not found"
@@ -774,13 +861,9 @@ app.post(
 
             if (
                 characterId &&
-                !characters.includes(
-                    characterId
-                )
+                !characters.includes(characterId)
             ) {
-                characters.push(
-                    characterId
-                );
+                characters.push(characterId);
             }
 
             const updated =
@@ -789,10 +872,9 @@ app.post(
                     {
                         stars:
                             (user.stars || 0) +
-                            stars,
+                            Number(stars),
 
-                        characters:
-                            characters
+                        characters
                     }
                 );
 
@@ -801,28 +883,25 @@ app.post(
                     "Reward applied",
 
                 starsEarned:
-                    stars,
+                    Number(stars),
 
                 profile:
-                    publicProfile(
-                        updated
-                    )
+                    publicProfile(updated)
             });
 
         } catch (error) {
+
             console.log(
                 "AWARD ERROR",
                 error.message
             );
 
             res.status(500).json({
-                message:
-                    "Server error"
+                message: "Server error"
             });
         }
     }
 );
-
 
 /* =========================
    MATCHMAKING
@@ -832,43 +911,13 @@ const rooms = [];
 
 const ROOM_SIZE = 4;
 
-
-/*
-   IMPORTANT
-
-   Questions are stored inside the room.
-
-   Therefore:
-
-   Player 1
-          |
-   Player 2
-          |
-   Player 3
-          |
-   Player 4
-          |
-          v
-   ONE OpenRouter request
-          |
-          v
-   room.questions
-          |
-      +---+---+---+
-      |   |   |   |
-     P1  P2  P3  P4
-
-   Every player gets the SAME questions.
-*/
-
-
 function findPlayerRoom(id) {
+
     for (const room of rooms) {
+
         if (
             room.players.some(
-                function(player) {
-                    return player.id === id;
-                }
+                p => p.id === id
             )
         ) {
             return room;
@@ -878,15 +927,13 @@ function findPlayerRoom(id) {
     return null;
 }
 
-
 function findRoom(subject) {
+
     for (const room of rooms) {
+
         if (
             room.subject === subject &&
-            (
-                room.status === "waiting" ||
-                room.status === "generating"
-            ) &&
+            room.status === "waiting" &&
             room.players.length < ROOM_SIZE
         ) {
             return room;
@@ -896,26 +943,26 @@ function findRoom(subject) {
     return null;
 }
 
-
 function roomData(room) {
+
     return {
+
         id: room.id,
 
-        subject:
-            room.subject,
+        subject: room.subject,
 
-        size:
-            room.size,
+        size: room.size,
 
-        status:
-            room.status,
+        status: room.status,
+
+        quizStatus:
+            room.quizStatus,
 
         countdownMs:
             room.status === "starting"
                 ? Math.max(
                     0,
-                    room.startAt -
-                    Date.now()
+                    room.startAt - Date.now()
                 )
                 : null,
 
@@ -925,56 +972,48 @@ function roomData(room) {
         players:
             room.players,
 
-        quizReady:
-            Array.isArray(
-                room.questions
-            ),
+        quiz:
+            room.quizStatus === "ready"
+                ? room.quiz
+                : null,
 
-        questions:
-            Array.isArray(
-                room.questions
-            )
-                ? room.questions
+        quizError:
+            room.quizStatus === "error"
+                ? room.quizError
                 : null
     };
 }
 
-
-/*
-   This function generates the quiz.
-
-   It is protected by room.generating.
-
-   This prevents multiple users from
-   accidentally causing multiple AI requests.
-*/
-
 async function generateRoomQuiz(room) {
 
-    if (room.questions) {
+    if (room.quizStatus === "creating") {
+
         console.log(
-            "QUIZ ALREADY EXISTS FOR ROOM:",
+            "Quiz is already being created for:",
             room.id
         );
 
         return;
     }
 
-    if (room.generating) {
+    if (room.quizStatus === "ready") {
+
         console.log(
-            "QUIZ ALREADY BEING GENERATED:",
+            "Quiz already exists for:",
             room.id
         );
 
-        return room.generating;
+        return;
     }
+
+    room.quizStatus = "creating";
 
     console.log(
         "================================="
     );
 
     console.log(
-        "GENERATING MATCHMAKING QUIZ"
+        "CREATING MATCHMAKING QUIZ"
     );
 
     console.log(
@@ -983,116 +1022,119 @@ async function generateRoomQuiz(room) {
     );
 
     console.log(
-        "SUBJECT:",
-        room.subject
+        "THIS WILL MAKE ONLY ONE AI REQUEST"
     );
 
     console.log(
         "================================="
     );
 
+    try {
 
-    room.status =
-        "generating";
-
-
-    room.generating =
-        createAIQuiz(
-            room.subject,
-            "Compete",
-            10
-        )
-        .then(function(quiz) {
-
-            room.questions =
-                quiz.questions;
-
-            room.status =
-                "starting";
-
-            room.startAt =
-                Date.now() + 5000;
-
-            console.log(
-                "================================="
+        const quiz =
+            await createAIQuiz(
+                room.subject,
+                "Compete",
+                10
             );
 
-            console.log(
-                "MATCHMAKING QUIZ READY"
-            );
+        room.quiz = quiz;
 
-            console.log(
-                "ROOM:",
-                room.id
-            );
+        room.quizStatus = "ready";
 
-            console.log(
-                "QUESTIONS:",
-                room.questions.length
-            );
+        room.quizError = null;
 
-            console.log(
-                "================================="
-            );
+        room.status = "starting";
 
-            setTimeout(
-                function() {
+        room.startAt =
+            Date.now() + 5000;
 
-                    if (
-                        rooms.includes(
-                            room
-                        )
-                    ) {
-                        room.status =
-                            "playing";
+        console.log(
+            "================================="
+        );
 
-                        console.log(
-                            "ROOM NOW PLAYING:",
-                            room.id
-                        );
-                    }
+        console.log(
+            "MATCHMAKING QUIZ READY"
+        );
 
-                },
-                5000
-            );
+        console.log(
+            "ROOM:",
+            room.id
+        );
 
-            return quiz;
+        console.log(
+            "All players will receive the same quiz."
+        );
 
-        })
-        .catch(function(error) {
+        console.log(
+            "================================="
+        );
 
-            console.log(
-                "MATCHMAKING AI ERROR"
-            );
+        setTimeout(function() {
 
-            console.log(
-                error.message
-            );
+            const index =
+                rooms.indexOf(room);
 
-            room.status =
-                "waiting";
+            if (index !== -1) {
 
-            room.questions =
-                null;
+                rooms.splice(
+                    index,
+                    1
+                );
+            }
 
-            throw error;
+        }, 10 * 60 * 1000);
 
-        })
-        .finally(function() {
+    } catch (error) {
 
-            room.generating =
-                null;
+        console.log(
+            "MATCHMAKING QUIZ FAILED:",
+            error.message
+        );
 
-        });
+        room.quizStatus = "error";
 
+        room.quizError =
+            error.message;
 
-    return room.generating;
+        room.status = "waiting";
+    }
 }
 
+function checkRoomStart(room) {
 
-/* =========================
-   MATCHMAKE
-========================= */
+    if (
+        room.status !== "waiting"
+    ) {
+        return;
+    }
+
+    if (
+        room.players.length === 0
+    ) {
+        return;
+    }
+
+    const everyoneReady =
+        room.players.every(
+            function(player) {
+                return player.vote === true;
+            }
+        );
+
+    if (!everyoneReady) {
+        return;
+    }
+
+    if (
+        room.quizStatus === "creating" ||
+        room.quizStatus === "ready"
+    ) {
+        return;
+    }
+
+    generateRoomQuiz(room);
+}
 
 app.post(
     "/matchmaking/matchmake",
@@ -1110,26 +1152,25 @@ app.post(
             !name ||
             !subject
         ) {
+
             return res.status(400).json({
                 message:
                     "Missing matchmaking information"
             });
         }
 
-
         let room =
             findPlayerRoom(id);
-
 
         if (!room) {
 
             room =
                 findRoom(subject);
 
-
             if (!room) {
 
                 room = {
+
                     id:
                         "room_" +
                         Date.now() +
@@ -1150,26 +1191,29 @@ app.post(
                     startAt:
                         null,
 
-                    players:
-                        [],
+                    quizStatus:
+                        "waiting",
 
-                    questions:
+                    quiz:
                         null,
 
-                    generating:
-                        null
+                    quizError:
+                        null,
+
+                    players:
+                        []
                 };
 
                 rooms.push(room);
 
                 console.log(
-                    "NEW ROOM CREATED:",
+                    "NEW ROOM:",
                     room.id
                 );
             }
 
-
             room.players.push({
+
                 id:
                     id,
 
@@ -1182,13 +1226,6 @@ app.post(
                 vote:
                     null
             });
-
-
-            console.log(
-                "PLAYER JOINED ROOM:",
-                id,
-                room.id
-            );
 
         } else {
 
@@ -1209,17 +1246,13 @@ app.post(
             }
         }
 
+        checkRoomStart(room);
 
         res.json(
             roomData(room)
         );
     }
 );
-
-
-/* =========================
-   VOTE / READY
-========================= */
 
 app.post(
     "/matchmaking/vote",
@@ -1230,32 +1263,16 @@ app.post(
             vote
         } = req.body;
 
-
         const room =
             findPlayerRoom(id);
 
-
         if (!room) {
+
             return res.status(404).json({
                 message:
                     "Matchmaking room not found"
             });
         }
-
-
-        if (
-            room.status ===
-            "starting" ||
-            room.status ===
-            "generating" ||
-            room.status ===
-            "playing"
-        ) {
-            return res.json(
-                roomData(room)
-            );
-        }
-
 
         const player =
             room.players.find(
@@ -1264,193 +1281,61 @@ app.post(
                 }
             );
 
-
         if (!player) {
+
             return res.status(404).json({
                 message:
                     "Player not found"
             });
         }
 
+        if (
+            room.status === "starting"
+        ) {
+
+            return res.json(
+                roomData(room)
+            );
+        }
+
+        if (
+            room.quizStatus === "creating"
+        ) {
+
+            return res.json(
+                roomData(room)
+            );
+        }
 
         player.vote =
             vote === true;
 
-
-        console.log(
-            "PLAYER READY:",
-            id
-        );
-
-
-        const everyoneReady =
-            room.players.length > 0 &&
-            room.players.every(
-                function(player) {
-                    return player.vote === true;
-                }
-            );
-
-
-        /*
-           IMPORTANT:
-
-           We do NOT generate the quiz
-           when the first player presses ready.
-
-           We only generate when everyone
-           in the room is ready.
-        */
-
-        if (
-            everyoneReady &&
-            room.players.length >= 2 &&
-            !room.questions &&
-            !room.generating
-        ) {
-
-            console.log(
-                "EVERYONE READY"
-            );
-
-            console.log(
-                "STARTING ONE AI REQUEST"
-            );
-
-
-            /*
-               Do not await this before
-               returning the response.
-
-               The frontend can poll the
-               matchmaking endpoint while
-               the AI is creating the quiz.
-            */
-
-            generateRoomQuiz(room)
-                .catch(function(error) {
-                    console.log(
-                        "ROOM QUIZ GENERATION FAILED:",
-                        error.message
-                    );
-                });
-        }
-
+        checkRoomStart(room);
 
         res.json(
             roomData(room)
         );
     }
 );
-
-
-/* =========================
-   GET MATCHMAKING ROOM
-========================= */
-
-app.get(
-    "/matchmaking/room/:id",
-    function(req, res) {
-
-        const room =
-            findPlayerRoom(
-                req.params.id
-            );
-
-
-        if (!room) {
-            return res.status(404).json({
-                message:
-                    "Matchmaking room not found"
-            });
-        }
-
-
-        res.json(
-            roomData(room)
-        );
-    }
-);
-
-
-/* =========================
-   GET MATCHMAKING QUIZ
-========================= */
-
-app.get(
-    "/matchmaking/quiz/:id",
-    function(req, res) {
-
-        const room =
-            findPlayerRoom(
-                req.params.id
-            );
-
-
-        if (!room) {
-            return res.status(404).json({
-                message:
-                    "Matchmaking room not found"
-            });
-        }
-
-
-        if (
-            !room.questions
-        ) {
-
-            return res.status(202).json({
-                message:
-                    "Quiz is still being created.",
-
-                status:
-                    room.status,
-
-                quizReady:
-                    false
-            });
-        }
-
-
-        res.json({
-
-            subject:
-                room.subject,
-
-            mode:
-                "Compete",
-
-            questions:
-                room.questions
-        });
-    }
-);
-
-
-/* =========================
-   LEAVE MATCHMAKING
-========================= */
 
 app.post(
     "/matchmaking/leave",
-    function(req, res) {
+    (req, res) => {
 
         const {
             id
         } = req.body;
 
-
         const room =
             findPlayerRoom(id);
 
-
         if (!room) {
+
             return res.json({
                 message:
                     "Player was not in a room"
             });
         }
-
 
         room.players =
             room.players.filter(
@@ -1459,13 +1344,6 @@ app.post(
                 }
             );
 
-
-        console.log(
-            "PLAYER LEFT ROOM:",
-            id
-        );
-
-
         if (
             room.players.length === 0
         ) {
@@ -1473,21 +1351,14 @@ app.post(
             const index =
                 rooms.indexOf(room);
 
-
             if (index !== -1) {
+
                 rooms.splice(
                     index,
                     1
                 );
             }
-
-
-            console.log(
-                "ROOM DELETED:",
-                room.id
-            );
         }
-
 
         res.json({
             message:
@@ -1496,7 +1367,6 @@ app.post(
     }
 );
 
-
 /* =========================
    SERVER
 ========================= */
@@ -1504,10 +1374,9 @@ app.post(
 const PORT =
     process.env.PORT || 3000;
 
-
 app.listen(
     PORT,
-    function() {
+    () => {
 
         console.log(
             `Server running on port ${PORT}`
@@ -1518,7 +1387,7 @@ app.listen(
         );
 
         console.log(
-            `Matchmaking quiz endpoint: GET /matchmaking/quiz/:id`
+            `Matchmaking endpoint: POST /matchmaking/matchmake`
         );
     }
 );
