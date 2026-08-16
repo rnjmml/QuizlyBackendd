@@ -268,7 +268,7 @@ async function createAIQuiz(subject, mode, questionCount) {
 
     const difficulty =
         mode === "Compete"
-            ? "moderate difficulty with some challenging questions"
+            ? "easy to moderate difficulty for kids aged 9-15"
             : "beginner to moderate difficulty";
 
     const prompt = `
