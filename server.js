@@ -10,8 +10,8 @@ app.use(express.json());
 
 const DB_BASE = "https://priornetwork.com/web/ranijumamil/db/quizly/users";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const AI_MODEL = "openrouter/free";
+const PRIOR_URL = "https://priornetwork.com/prior/api/chat";
+const AI_MODEL = "prior-standard";
 
 function dbHeaders() {
     return {
@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
     res.json({
         status: "ok",
-        ai: !!process.env.OPENROUTER_API_KEY
+        ai: !!process.env.PRIOR_API_KEY
     });
 });
 
@@ -243,8 +243,8 @@ async function createAIQuiz(subject, mode, questionCount) {
 
     console.log("AI SUBJECT RECEIVED:", subject);
     
-    if (!process.env.OPENROUTER_API_KEY) {
-        throw new Error("OPENROUTER_API_KEY is missing");
+    if (!process.env.PRIOR_API_KEY) {
+        throw new Error("PRIOR_API_KEY is missing");
     }
 
     const count = Math.min(
@@ -310,7 +310,7 @@ Rules:
     try {
 
         const response = await axios.post(
-            OPENROUTER_URL,
+            PRIOR_URL,
             {
                 model: AI_MODEL,
 
@@ -324,53 +324,24 @@ Rules:
                         role: "user",
                         content: prompt
                     }
-                ],
-
-                response_format: {
-                    type: "json_schema",
-                    json_schema: {
-                        name: "quiz",
-                        strict: true,
-                        schema: quizSchema
-                    }
-                },
-
-                plugins: [
-                    {
-                        id: "response-healing"
-                    }
-                ],
-
-                provider: {
-                    require_parameters: true
-                },
-
-                temperature: 0.3,
-
-                max_tokens: 5000
+                ]
             },
             {
                 headers: {
                     "Content-Type": "application/json",
 
                     "Authorization":
-                        `Bearer ${process.env.OPENROUTER_API_KEY}`,
-
-                    "HTTP-Referer":
-                        "https://quizlybackendd.onrender.com",
-
-                    "X-Title":
-                        "QuiZly"
+                        `Bearer ${process.env.PRIOR_API_KEY}`,
                 },
 
                 timeout: 60000
             }
         );
 
-        console.log("OpenRouter status:", response.status);
-        console.log("OpenRouter model:", response.data?.model);
+        console.log("Prior status:", response.status);
+        console.log("Prior model:", response.data?.model);
 
-        const message = response.data?.choices?.[0]?.message;
+        let content = response.data?.response;
 
         if (!message) {
             throw new Error(
@@ -380,6 +351,12 @@ Rules:
 
         let content = message.content;
 
+        if (content == null) {
+            throw new Error(
+                "Prior did not return a response."
+            );
+        }
+        
         if (Array.isArray(content)) {
 
             content = content
@@ -392,6 +369,8 @@ Rules:
                 .join("");
         }
 
+        content = String(content);
+        
         console.log("AI response received.");
 
         const quiz = extractJson(content);
@@ -440,12 +419,12 @@ Rules:
         if (error.response) {
 
             console.log(
-                "OpenRouter status:",
+                "Prior status:",
                 error.response.status
             );
 
             console.log(
-                "OpenRouter response:"
+                "Prior response:"
             );
 
             console.log(
