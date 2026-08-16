@@ -289,6 +289,9 @@ async function createAIQuiz(subject, mode, questionCount) {
             ? "easy to moderate difficulty for kids aged 9-15"
             : "beginner to moderate difficulty";
 
+    const audience =
+        "children between 9 and 15 years old";
+    
     const prompt = `
 Create a quiz for the educational game QuiZly.
 
@@ -296,6 +299,7 @@ Subject: ${subject}
 Mode: ${mode}
 Number of questions: ${count}
 Difficulty: ${difficulty}
+Audience: ${audience}
 
 The questions must focus on:
 ${topic}
@@ -313,6 +317,8 @@ Rules:
 - Do not use "All of the above".
 - Do not use "None of the above".
 - Keep the questions appropriate for students.
+- Use simple, clear language a 9 to 15 year old can understand.
+- Use age-appropriate topics, examples, and scenarios.
 - Keep explanations short.
 - Do not add any text outside the JSON response.
 `;
