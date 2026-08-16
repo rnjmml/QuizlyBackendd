@@ -1160,6 +1160,9 @@ async function generateRoomQuiz(room) {
         room.quizError =
             error.message;
 
+        room.quizRetyAt = 
+            Date.now();
+        
         room.status = "waiting";
     }
 }
@@ -1189,9 +1192,13 @@ function checkRoomStart(room) {
         return;
     }
 
+    if (room.quizStatus === "creating" || room.quizStatus === "ready") {
+        return;
+    }
+    
     if (
-        room.quizStatus === "creating" ||
-        room.quizStatus === "ready"
+        room.quizRetryAt &&
+        Date.now() < room.quizRetryAt + 8000
     ) {
         return;
     }
