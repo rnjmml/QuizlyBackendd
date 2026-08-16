@@ -11,7 +11,7 @@ app.use(express.json());
 const DB_BASE = "https://priornetwork.com/web/ranijumamil/db/quizly/users";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const AI_MODEL = "nvidia/nemotron-3.5-lightning:free";
+const AI_MODEL = "google/gemma-3-27b-it:free";
 
 function dbHeaders() {
     return {
@@ -45,20 +45,20 @@ app.get("/test-ai", async (req, res) => {
                 model: AI_MODEL,
                 messages: [
                     {
+                        role: "system",
+                        content: "You create accurate educational multiple-choice quizzes and return valid JSON only."
+                    },
+                    {
                         role: "user",
-                        content: "Reply with exactly: AI TEST WORKS"
+                        content: prompt
                     }
                 ],
-                max_tokens: 20
-            },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
+                response_format: {
+                    type: "json_object"
                 },
-                timeout: 60000
-            }
-        );
+                temperature: 0.3,
+                max_tokens: 5000
+            },
 
         console.log("OPENROUTER TEST SUCCESS");
         console.log(response.data);
