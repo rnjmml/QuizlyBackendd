@@ -1024,6 +1024,7 @@ async function generateRoomQuiz(room) {
     }
 
     room.quizStatus = "creating";
+    room.status = "creating";
 
     console.log(
         "================================="
