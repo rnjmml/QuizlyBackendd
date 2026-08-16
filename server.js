@@ -31,6 +31,13 @@ app.get("/health", (req, res) => {
     });
 });
 
+app.get("/test-version", (req, res) => {
+    res.json({
+        version: "matchmaking-vote-added",
+        voteRoute: "exists"
+    });
+});
+
 /* =========================
    AI QUIZ
 ========================= */
