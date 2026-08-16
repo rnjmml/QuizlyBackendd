@@ -11,7 +11,7 @@ app.use(express.json());
 const DB_BASE = "https://priornetwork.com/web/ranijumamil/db/quizly/users";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const AI_MODEL = "google/gemma-4-31b-it:free";
+const AI_MODEL = "openrouter/free";
 
 function dbHeaders() {
     return {
