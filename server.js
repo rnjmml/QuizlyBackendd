@@ -59,7 +59,7 @@ app.get("/test-ai", async (req, res) => {
                 temperature: 0.3,
                 max_tokens: 5000
             },
-
+        )
         console.log("OPENROUTER TEST SUCCESS");
         console.log(response.data);
 
