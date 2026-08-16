@@ -1276,6 +1276,70 @@ app.post(
 );
 
 app.post(
+    "/matchmaking/vote",
+    async (req, res) => {
+
+        const {
+            id,
+            vote
+        } = req.body;
+
+        const room =
+            findPlayerRoom(id);
+
+        if (!room) {
+
+            return res.status(404).json({
+                message:
+                    "Matchmaking room not found"
+            });
+        }
+
+        const player =
+            room.players.find(
+                function(p) {
+                    return p.id === id;
+                }
+            );
+
+        if (!player) {
+
+            return res.status(404).json({
+                message:
+                    "Player not found"
+            });
+        }
+
+        if (
+            room.status === "starting"
+        ) {
+
+            return res.json(
+                roomData(room)
+            );
+        }
+
+        if (
+            room.quizStatus === "creating"
+        ) {
+
+            return res.json(
+                roomData(room)
+            );
+        }
+
+        player.vote =
+            vote === true;
+
+        checkRoomStart(room);
+
+        res.json(
+            roomData(room)
+        );
+    }
+);
+
+app.post(
     "/matchmaking/answer",
     async (req, res) => {
 
