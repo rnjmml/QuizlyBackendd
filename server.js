@@ -10,7 +10,7 @@ app.use(express.json());
 
 const DB_BASE = "https://priornetwork.com/web/ranijumamil/db/quizly/users";
 
-const PRIOR_URL = "https://priornetwork.com/prior/api/chat";
+const PRIOR_URL = "https://priornetwork.com/prior/api/generate";
 const AI_MODEL = "prior-standard";
 
 function dbHeaders() {
@@ -314,17 +314,11 @@ Rules:
             {
                 model: AI_MODEL,
 
-                messages: [
-                    {
-                        role: "system",
-                        content:
-                            "You create accurate educational multiple-choice quizzes. Return only JSON that follows the requested schema."
-                    },
-                    {
-                        role: "user",
-                        content: prompt
-                    }
-                ]
+                prompt:
+                    "You create accurate educational multiple-choice quizzes. " +
+                    "Return only JSON that follows that requested schema. \n\n +
+                    prompt
+             
             },
             {
                 headers: {
@@ -334,7 +328,7 @@ Rules:
                         `Bearer ${process.env.PRIOR_API_KEY}`,
                 },
 
-                timeout: 60000
+                timeout: 120000
             }
         );
 
