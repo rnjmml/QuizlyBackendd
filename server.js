@@ -313,10 +313,9 @@ Rules:
             PRIOR_URL,
             {
                 model: AI_MODEL,
-
                 prompt:
                     "You create accurate educational multiple-choice quizzes. " +
-                    "Return only JSON that follows that requested schema. \n\n +
+                    "Return only JSON that follows that requested schema. \n\n" +
                     prompt
              
             },
