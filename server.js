@@ -275,10 +275,10 @@ async function createAIQuiz(subject, mode, questionCount) {
             "English language, grammar, vocabulary, reading comprehension, and basic literature",
 
         Math:
-            "mathematics appropriate for students, including arithmetic, algebra, geometry, and problem solving",
+            "mathematics appropriate for students, including basic math problems like addition, subtraction, multiplication, division, and problem solving",
 
         Science:
-            "general science, biology, chemistry, physics, Earth science, and basic scientific concepts"
+            "general science, Earth science, and basic scientific concepts"
     };
 
     const topic =
@@ -286,11 +286,11 @@ async function createAIQuiz(subject, mode, questionCount) {
 
     const difficulty =
         mode === "Compete"
-            ? "easy to moderate difficulty for kids aged 9-15"
+            ? "easy to moderate difficulty for kids aged 8-10"
             : "beginner to moderate difficulty";
 
     const audience =
-        "children between 9 and 15 years old";
+        "children between 8 and 10 years old";
     
     const prompt = `
 Create a quiz for the educational game QuiZly.
