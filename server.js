@@ -344,6 +344,115 @@ Rules:
     console.log("Questions:", count);
     console.log("=================================");
 
+    if (isThreeRound) {
+        console.log("THREE-ROUND MODE: 3x10 batches for 8-10");
+
+        async function fetchBatch(diffLabel, diffDesc) {
+            const batchPrompt = `
+Create a quiz for the educational game QuiZly.
+
+Subject: ${subject}
+Mode: ${mode} (${diffLabel})
+Number of questions: 10
+Difficulty: ${diffDesc}
+Audience: ${audience}
+
+The questions must focus on:
+${topic}
+
+Create exactly 10 multiple-choice questions at ${diffDesc}.
+
+Every question must have:
+- exactly 4 options
+- exactly 1 correct answer
+- an answer that exactly matches one of the options
+- a short explanation
+
+Rules:
+- Do not repeat questions.
+- Do not use "All of the above".
+- Do not use "None of the above".
+- Keep the questions appropriate for students aged 8-10.
+- Use simple, clear language an 8 to 10 year old can understand.
+- Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
+- Keep explanations short.
+- Do not add any text outside the JSON response.
+ `;
+
+            const resp = await axios.post(
+                PRIOR_URL,
+                {
+                    model: AI_MODEL,
+                    prompt:
+                        "You create accurate educational multiple-choice quizzes for kids aged 8-10. " +
+                        "Return ONLY a JSON object with a single key \"questions\" " +
+                        "whose value is an array of question objects. " +
+                        "Each question object must use exactly these keys: " +
+                        "\"question\" (string), \"options\" (array of 4 strings), " +
+                        "\"answer\" (string that exactly matches one of the options), " +
+                        "and \"explanation\" (short string).\n\n" +
+                        batchPrompt
+                },
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${process.env.PRIOR_API_KEY}`
+                    },
+                    timeout: 120000
+                }
+            );
+
+            let content = resp.data?.response;
+            if (content == null) throw new Error("Prior did not return a response for " + diffLabel);
+            if (Array.isArray(content)) {
+                content = content.filter(function(item){return item && item.type === "text";}).map(function(item){return item.text || "";}).join("");
+            }
+            content = String(content);
+            const quiz = extractJson(content);
+            if (!quiz) {
+                console.log("INVALID AI JSON for " + diffLabel);
+                console.log(content);
+                throw new Error("The AI returned an invalid quiz format for " + diffLabel);
+            }
+            const qs = validateQuiz(quiz, 10);
+            if (!qs) {
+                console.log("VALIDATION FAILED for " + diffLabel);
+                console.log(JSON.stringify(quiz,null,2));
+                throw new Error("The AI did not return 10 valid questions for " + diffLabel);
+            }
+            console.log(diffLabel + " batch ready: " + qs.length);
+            return qs;
+        }
+
+        try {
+            const [easyQs, medQs, hardQs] = await Promise.all([
+                fetchBatch("EASY", "EASY for kids aged 8-10 (simple recall, basic vocabulary, single-step)"),
+                fetchBatch("INTERMEDIATE", "INTERMEDIATE for kids aged 8-10 (application, two-step reasoning)"),
+                fetchBatch("HARD", "HARD for kids aged 8-10 (analysis/inference, multi-step, still within 8-10 reading level)")
+            ]);
+
+            const allQuestions = [...easyQs, ...medQs, ...hardQs];
+            console.log(`AI quiz successfully created with ${allQuestions.length} questions (10+10+10).`);
+            return {
+                subject: subject,
+                mode: mode,
+                questions: allQuestions
+            };
+        } catch (error) {
+            console.log("=================================");
+            console.log("AI QUIZ BATCH ERROR");
+            console.log("=================================");
+            if (error.response) {
+                console.log("Prior status:", error.response.status);
+                console.log(JSON.stringify(error.response.data,null,2));
+                throw new Error(error.response.data?.error?.message || error.response.data?.message || "Prior request failed.");
+            }
+            console.log("Error:", error.message);
+            if (error.stack) console.log("Error stack:", error.stack);
+            throw error;
+        }
+    }
+
     try {
 
         const response = await axios.post(
@@ -480,7 +589,7 @@ Rules:
             throw new Error(
                 error.response.data?.error?.message ||
                 error.response.data?.message ||
-                "OpenRouter request failed."
+                "Prior request failed."
             );
         }
 
