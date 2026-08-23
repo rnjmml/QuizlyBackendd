@@ -169,6 +169,20 @@ function extractJson(content) {
     return null;
 }
 
+function getNumericValue(str){
+    var s = String(str).toLowerCase().trim();
+    if(/^\d+(\.\d+)?$/.test(s)) return Number(s);
+    var m = s.match(/(\d+(?:\.\d+)?)\s*(?:times|x|×|\*)\s*(\d+(?:\.\d+)?)/);
+    if(m) return Number(m[1]) * Number(m[2]);
+    m = s.match(/(\d+(?:\.\d+)?)\s*(?:plus|\+)\s*(\d+(?:\.\d+)?)/);
+    if(m) return Number(m[1]) + Number(m[2]);
+    m = s.match(/(\d+(?:\.\d+)?)\s*(?:minus|-)\s*(\d+(?:\.\d+)?)/);
+    if(m) return Number(m[1]) - Number(m[2]);
+    m = s.match(/(\d+(?:\.\d+)?)\s*(?:divided\s+by|\/)\s*(\d+(?:\.\d+)?)/);
+    if(m) return Number(m[2]) !== 0 ? Number(m[1]) / Number(m[2]) : null;
+    return null;
+}
+
 function validateQuiz(quiz, count) {
     if (!quiz) {
         return null;
@@ -223,7 +237,25 @@ function validateQuiz(quiz, count) {
                 return String(option).trim().toLowerCase() === answer;
             });
 
-            return validAnswer;
+            if(!validAnswer) return false;
+
+            var lowerOpts = q.options.map(function(o){ return String(o).trim().toLowerCase(); });
+            var seenStr = {};
+            for(var i=0;i<lowerOpts.length;i++){
+                if(seenStr[lowerOpts[i]]) return false;
+                seenStr[lowerOpts[i]] = true;
+            }
+
+            var nums = q.options.map(function(o){ return getNumericValue(o); });
+            var seenNum = {};
+            for(var i=0;i<nums.length;i++){
+                if(nums[i] != null){
+                    if(seenNum[nums[i]] != null) return false;
+                    seenNum[nums[i]] = true;
+                }
+            }
+
+            return true;
         })
         .map(function(q) {
 
@@ -347,6 +379,9 @@ Rules:
 - Use simple, clear language an 8 to 10 year old can understand.
 - Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
 - Keep explanations to 1-2 short sentences max (≤25 words), directly explaining why the answer is correct — no long stories.
+- CRITICAL: Exactly ONE option must be correct. The other 3 must be definitively wrong and must NOT be mathematically or semantically equivalent to the correct answer (e.g., if the correct answer is "15 times 8 = 120", do NOT include "12 times 10", "10 times 12", or "8 times 15" as distractors because they also equal 120 — all options must have distinct values).
+- No two options may be duplicates or commutative variants (e.g., "8 times 15" and "15 times 8" are duplicates).
+- Shuffle the position of the correct answer randomly among A, B, C, D.
 - Do not add any text outside the JSON response.
  `;
 
@@ -390,6 +425,9 @@ Rules:
 - Use simple, clear language an 8 to 10 year old can understand.
 - Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
 - Keep explanations to 1-2 short sentences max (≤25 words), directly explaining why the answer is correct — no long stories.
+- CRITICAL: Exactly ONE option must be correct. The other 3 must be definitively wrong and must NOT be equivalent in value (e.g., if correct is "15 times 8 = 120", do NOT include "12 times 10", "10 times 12", or "8 times 15" as they also equal 120 — all options must have distinct values).
+- No two options may be duplicates or commutative variants.
+- Shuffle the position of the correct answer randomly among A, B, C, D.
 - Do not add any text outside the JSON response.
  `;
 
