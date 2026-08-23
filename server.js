@@ -1641,6 +1641,22 @@ function advanceRoom(room) {
             room.id
         );
 
+        setTimeout(function(){
+
+            const idx =
+                rooms.indexOf(room);
+
+            if(idx !== -1){
+
+                rooms.splice(idx, 1);
+
+                console.log(
+                    "AUTO-CLEANED FINISHED ROOM:",
+                    room.id
+                );
+            }
+        }, 30000);
+
         return;
     }
 
@@ -2108,6 +2124,8 @@ app.post(
                     1
                 );
             }
+        } else if(room.status === "finished" && room.players.length === 1){
+            // keep the last player in finished briefly so they see results, auto-clean will run at 30s
         }
 
         res.json({
