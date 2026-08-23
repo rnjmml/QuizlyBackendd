@@ -1702,29 +1702,6 @@ app.post(
         let room =
             findPlayerRoom(id);
 
-        if(room && (room.status === "active" || room.status === "finished")){
-            room.players =
-                room.players.filter(function(p){
-                    return p.id !== id;
-                });
-
-            if(room.players.length === 0){
-                const idx = rooms.indexOf(room);
-                if(idx !== -1) rooms.splice(idx, 1);
-            }else{
-                clearRoomQuestionTimer(room);
-            }
-
-            console.log(
-                "PLAYER LEFT STALE ROOM ON NEW MATCHMAKE:",
-                room.id,
-                "status was",
-                room.status
-            );
-
-            room = null;
-        }
-
         if (!room) {
 
             room =
