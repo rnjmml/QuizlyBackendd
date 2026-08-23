@@ -266,8 +266,8 @@ async function createAIQuiz(subject, mode, questionCount) {
     }
 
     const count = Math.min(
-        Math.max(Number(questionCount) || 10, 1),
-        20
+        Math.max(Number(questionCount) || 30, 1),
+        30
     );
 
     const subjectRules = {
@@ -284,14 +284,27 @@ async function createAIQuiz(subject, mode, questionCount) {
     const topic =
         subjectRules[subject] || subjectRules.English;
 
-    const difficulty =
-        mode === "Compete"
-            ? "easy to moderate difficulty for kids aged 8-10"
-            : "beginner to moderate difficulty";
-
     const audience =
         "children between 8 and 10 years old";
-    
+
+    const isThreeRound = count === 30;
+
+    const difficulty = isThreeRound
+        ? "progressive across 3 rounds for kids aged 8-10: Round 1 Easy for 8-10, Round 2 Intermediate for 8-10, Round 3 Hard for 8-10 (hardest still within 8-10 reading level)"
+        : mode === "Compete"
+            ? "easy to moderate difficulty for kids aged 8-10"
+            : "beginner to moderate difficulty for kids aged 8-10";
+
+    const roundBlock = isThreeRound
+        ? `
+ROUND STRUCTURE (must follow exactly, in this order, all for kids aged 8-10):
+- Questions 1-10: EASY for 8-10 year olds (simple recall, basic vocabulary, single-step, very clear wording)
+- Questions 11-20: INTERMEDIATE for 8-10 year olds (application, two-step reasoning, slightly longer stems)
+- Questions 21-30: HARD for 8-10 year olds (analysis/inference, harder vocabulary still within 8-10 reading level, multi-step reasoning)
+Keep the array in that exact order so Round 1 is easy, Round 2 intermediate, Round 3 hard. Even the HARD round must remain solvable by a strong 10-year-old — do not use adult, high-school, or professional content.
+`
+        : "";
+
     const prompt = `
 Create a quiz for the educational game QuiZly.
 
@@ -303,7 +316,7 @@ Audience: ${audience}
 
 The questions must focus on:
 ${topic}
-
+${roundBlock}
 Create exactly ${count} multiple-choice questions.
 
 Every question must have:
@@ -317,11 +330,11 @@ Rules:
 - Do not use "All of the above".
 - Do not use "None of the above".
 - Keep the questions appropriate for students.
-- Use simple, clear language a 9 to 15 year old can understand.
-- Use age-appropriate topics, examples, and scenarios.
+- Use simple, clear language an 8 to 10 year old can understand.
+- Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
 - Keep explanations short.
 - Do not add any text outside the JSON response.
-`;
+ `;
 
     console.log("=================================");
     console.log("CREATING AI QUIZ");
@@ -338,7 +351,8 @@ Rules:
             {
                 model: AI_MODEL,
                 prompt:
-                    "You create accurate educational multiple-choice quizzes. " +
+                    "You create accurate educational multiple-choice quizzes for kids aged 8-10. " +
+                    (isThreeRound ? "Calibrate Easy, Intermediate, and Hard all within the 8-10 band — even Hard must be solvable by a strong 10-year-old. " : "") +
                     "Return ONLY a JSON object with a single key \"questions\" " +
                     "whose value is an array of question objects. " +
                     "Each question object must use exactly these keys: " +
@@ -356,7 +370,7 @@ Rules:
                         `Bearer ${process.env.PRIOR_API_KEY}`,
                 },
 
-                timeout: 120000
+                timeout: isThreeRound ? 180000 : 120000
             }
         );
 
@@ -500,7 +514,7 @@ app.post("/quiz", async (req, res) => {
     const {
         subject = "English",
         mode = "Study",
-        questionCount = 10
+        questionCount = 30
     } = req.body;
 
     try {
@@ -1097,7 +1111,7 @@ async function generateRoomQuiz(room) {
             await createAIQuiz(
                 room.subject,
                 "Compete",
-                10
+                30
             );
 
         room.quiz = quiz;
