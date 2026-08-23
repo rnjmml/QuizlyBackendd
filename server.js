@@ -1857,10 +1857,7 @@ currentQuestion:
            }
 
 
-           player.vote = null;
-
-
-           better.players.push(player);
+            better.players.push(player);
 
 
            room = better;
