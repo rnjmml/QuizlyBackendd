@@ -240,9 +240,23 @@ function validateQuiz(quiz, count) {
                         : q.correct
                 ).trim(),
 
-                explanation: q.explanation
-                    ? String(q.explanation).trim()
-                    : ""
+                explanation: (function(exp){
+                    if(!exp) return "";
+                    exp = String(exp).trim().replace(/\s+/g, " ");
+                    var sentences = exp.match(/[^.!?]+[.!?]+/g);
+                    if(sentences){
+                        if(sentences.length > 2) sentences = sentences.slice(0,2);
+                        exp = sentences.join(" ").trim();
+                    }
+                    if(exp.length > 160){
+                        exp = exp.slice(0,157).trim();
+                        var lastSpace = exp.lastIndexOf(" ");
+                        if(lastSpace > 100) exp = exp.slice(0, lastSpace);
+                        exp += "...";
+                    }
+                    if(exp && !/[.!?]$/.test(exp)) exp += ".";
+                    return exp;
+                })(q.explanation)
             };
         });
 
@@ -332,7 +346,7 @@ Rules:
 - Keep the questions appropriate for students.
 - Use simple, clear language an 8 to 10 year old can understand.
 - Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
-- Keep explanations short.
+- Keep explanations to 1-2 short sentences max (≤25 words), directly explaining why the answer is correct — no long stories.
 - Do not add any text outside the JSON response.
  `;
 
@@ -375,7 +389,7 @@ Rules:
 - Keep the questions appropriate for students aged 8-10.
 - Use simple, clear language an 8 to 10 year old can understand.
 - Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
-- Keep explanations short.
+- Keep explanations to 1-2 short sentences max (≤25 words), directly explaining why the answer is correct — no long stories.
 - Do not add any text outside the JSON response.
  `;
 
@@ -394,8 +408,8 @@ Rules:
                                 "Each question object must use exactly these keys: " +
                                 "\"question\" (string), \"options\" (array of 4 strings), " +
                                 "\"answer\" (string that exactly matches one of the options), " +
-                                "and \"explanation\" (short string).\n\n" +
-                                batchPrompt
+                    "and \"explanation\" (1-2 short sentences, max 25 words).\n\n" +
+                        batchPrompt
                         },
                         {
                             headers: {
@@ -483,7 +497,7 @@ Rules:
                     "Each question object must use exactly these keys: " +
                     "\"question\" (string), \"options\" (array of 4 strings), " +
                     "\"answer\" (string that exactly matches one of the options), " +
-                    "and \"explanation\" (short string).\n\n" +
+                    "and \"explanation\" (1-2 short sentences, max 25 words).\n\n" +
                     prompt
              
             },
