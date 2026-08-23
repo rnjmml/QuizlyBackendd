@@ -379,49 +379,64 @@ Rules:
 - Do not add any text outside the JSON response.
  `;
 
-            const resp = await axios.post(
-                PRIOR_URL,
-                {
-                    model: AI_MODEL,
-                    prompt:
-                        "You create accurate educational multiple-choice quizzes for kids aged 8-10. " +
-                        "Return ONLY a JSON object with a single key \"questions\" " +
-                        "whose value is an array of question objects. " +
-                        "Each question object must use exactly these keys: " +
-                        "\"question\" (string), \"options\" (array of 4 strings), " +
-                        "\"answer\" (string that exactly matches one of the options), " +
-                        "and \"explanation\" (short string).\n\n" +
-                        batchPrompt
-                },
-                {
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${process.env.PRIOR_API_KEY}`
-                    },
-                    timeout: 120000
-                }
-            );
+            const maxAttempts = 3;
+            let lastErr = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    const resp = await axios.post(
+                        PRIOR_URL,
+                        {
+                            model: AI_MODEL,
+                            prompt:
+                                "You create accurate educational multiple-choice quizzes for kids aged 8-10. " +
+                                "Return ONLY a JSON object with a single key \"questions\" " +
+                                "whose value is an array of question objects. " +
+                                "Each question object must use exactly these keys: " +
+                                "\"question\" (string), \"options\" (array of 4 strings), " +
+                                "\"answer\" (string that exactly matches one of the options), " +
+                                "and \"explanation\" (short string).\n\n" +
+                                batchPrompt
+                        },
+                        {
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${process.env.PRIOR_API_KEY}`
+                            },
+                            timeout: 120000
+                        }
+                    );
 
-            let content = resp.data?.response;
-            if (content == null) throw new Error("Prior did not return a response for " + diffLabel);
-            if (Array.isArray(content)) {
-                content = content.filter(function(item){return item && item.type === "text";}).map(function(item){return item.text || "";}).join("");
+                    let content = resp.data?.response;
+                    if (content == null) throw new Error("Prior did not return a response for " + diffLabel);
+                    if (Array.isArray(content)) {
+                        content = content.filter(function(item){return item && item.type === "text";}).map(function(item){return item.text || "";}).join("");
+                    }
+                    content = String(content);
+                    const quiz = extractJson(content);
+                    if (!quiz) {
+                        console.log("INVALID AI JSON for " + diffLabel);
+                        console.log(content);
+                        throw new Error("The AI returned an invalid quiz format for " + diffLabel);
+                    }
+                    const qs = validateQuiz(quiz, 10);
+                    if (!qs) {
+                        console.log("VALIDATION FAILED for " + diffLabel);
+                        console.log(JSON.stringify(quiz,null,2));
+                        throw new Error("The AI did not return 10 valid questions for " + diffLabel);
+                    }
+                    console.log(diffLabel + " batch ready: " + qs.length + (attempt > 1 ? " (attempt " + attempt + ")" : ""));
+                    return qs;
+                } catch (err) {
+                    lastErr = err;
+                    const isTimeout = err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'));
+                    const isPrior500 = err.response && err.response.status >= 500;
+                    const shouldRetry = isTimeout || isPrior500;
+                    console.log(diffLabel + " attempt " + attempt + " failed: " + err.message + (shouldRetry && attempt < maxAttempts ? " — retrying..." : ""));
+                    if (!shouldRetry || attempt === maxAttempts) throw err;
+                    await new Promise(function(r){ setTimeout(r, 2500 * attempt); });
+                }
             }
-            content = String(content);
-            const quiz = extractJson(content);
-            if (!quiz) {
-                console.log("INVALID AI JSON for " + diffLabel);
-                console.log(content);
-                throw new Error("The AI returned an invalid quiz format for " + diffLabel);
-            }
-            const qs = validateQuiz(quiz, 10);
-            if (!qs) {
-                console.log("VALIDATION FAILED for " + diffLabel);
-                console.log(JSON.stringify(quiz,null,2));
-                throw new Error("The AI did not return 10 valid questions for " + diffLabel);
-            }
-            console.log(diffLabel + " batch ready: " + qs.length);
-            return qs;
+            throw lastErr;
         }
 
         try {
