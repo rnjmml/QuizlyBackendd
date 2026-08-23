@@ -303,7 +303,7 @@ function validateQuiz(quiz, count) {
     return questions;
 }
 
-async function createAIQuiz(subject, mode, questionCount) {
+async function createAIQuiz(subject, mode, questionCount, round) {
 
     console.log("AI SUBJECT RECEIVED:", subject);
     
@@ -315,6 +315,106 @@ async function createAIQuiz(subject, mode, questionCount) {
         Math.max(Number(questionCount) || 30, 1),
         30
     );
+
+    const roundNum = Number(round) || null;
+
+    if(roundNum && count === 10 && (roundNum === 1 || roundNum === 2 || roundNum === 3)){
+        const diffMap = {
+            1: {label: "EASY", desc: "EASY for kids aged 8-10 (simple recall, basic vocabulary, single-step)"},
+            2: {label: "INTERMEDIATE", desc: "INTERMEDIATE for kids aged 8-10 (application, two-step reasoning)"},
+            3: {label: "HARD", desc: "HARD for kids aged 8-10 (analysis/inference, multi-step, still within 8-10 reading level)"}
+        };
+        const d = diffMap[roundNum];
+        console.log(`SINGLE-ROUND MODE: Round ${roundNum} ${d.label}`);
+        const subjectRulesSingle = {
+            English: "English language, grammar, vocabulary, reading comprehension, and basic literature",
+            Math: "mathematics appropriate for students, including basic math problems like addition, subtraction, multiplication, division, and problem solving",
+            Science: "general science, Earth science, and basic scientific concepts"
+        };
+        const topicSingle = subjectRulesSingle[subject] || subjectRulesSingle.English;
+        const audienceSingle = "children between 8 and 10 years old";
+        const singlePrompt = `
+Create a quiz for the educational game QuiZly.
+
+Subject: ${subject}
+Mode: ${mode} (ROUND ${roundNum} ${d.label})
+Number of questions: 10
+Difficulty: ${d.desc}
+Audience: ${audienceSingle}
+
+The questions must focus on:
+${topicSingle}
+
+Create exactly 10 multiple-choice questions at ${d.desc}.
+
+Every question must have:
+- exactly 4 options
+- exactly 1 correct answer
+- an answer that exactly matches one of the options
+- a short explanation
+
+Rules:
+- Do not repeat questions.
+- Do not use "All of the above".
+- Do not use "None of the above".
+- Keep the questions appropriate for students aged 8-10.
+- Use simple, clear language an 8 to 10 year old can understand.
+- Use age-appropriate topics, examples, and scenarios for 8-10 year olds.
+- Keep explanations to 1-2 short sentences max (≤25 words), directly explaining why the answer is correct — no long stories.
+- CRITICAL: Exactly ONE option must be correct. The other 3 must be definitively wrong and must NOT be equivalent in value (e.g., if correct is "15 times 8 = 120", do NOT include "12 times 10", "10 times 12", or "8 times 15" as they also equal 120 — all options must have distinct values).
+- No two options may be duplicates or commutative variants.
+- Shuffle the position of the correct answer randomly among A, B, C, D.
+- Do not add any text outside the JSON response.
+ `;
+
+        async function fetchSingle(){
+            const maxAttempts = 3;
+            let lastErr = null;
+            for(let attempt=1; attempt<=maxAttempts; attempt++){
+                try{
+                    const resp = await axios.post(
+                        PRIOR_URL,
+                        {
+                            model: AI_MODEL,
+                            prompt: "You create accurate educational multiple-choice quizzes for kids aged 8-10. Return ONLY a JSON object with a single key \"questions\" whose value is an array of question objects. Each question object must use exactly these keys: \"question\" (string), \"options\" (array of 4 strings), \"answer\" (string that exactly matches one of the options), and \"explanation\" (1-2 short sentences, max 25 words).\n\n" + singlePrompt
+                        },
+                        {
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${process.env.PRIOR_API_KEY}`
+                            },
+                            timeout: 120000
+                        }
+                    );
+                    let content = resp.data?.response;
+                    if(content == null) throw new Error("Prior did not return a response for ROUND " + roundNum);
+                    if(Array.isArray(content)){
+                        content = content.filter(function(item){return item && item.type === "text";}).map(function(item){return item.text || "";}).join("");
+                    }
+                    content = String(content);
+                    const quiz = extractJson(content);
+                    if(!quiz) throw new Error("The AI returned an invalid quiz format for ROUND " + roundNum);
+                    const qs = validateQuiz(quiz, 10);
+                    if(!qs) throw new Error("The AI did not return 10 valid questions for ROUND " + roundNum);
+                    console.log(`ROUND ${roundNum} ${d.label} ready: ` + qs.length);
+                    return qs;
+                }catch(err){
+                    lastErr = err;
+                    const isTimeout = err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'));
+                    const isPrior500 = err.response && err.response.status >= 500;
+                    const isValidation = err.message && (err.message.includes('did not return 10 valid') || err.message.includes('invalid quiz format'));
+                    const shouldRetry = isTimeout || isPrior500 || isValidation;
+                    console.log(`ROUND ${roundNum} attempt ${attempt} failed: ${err.message}` + (shouldRetry && attempt < maxAttempts ? " — retrying..." : ""));
+                    if(!shouldRetry || attempt === maxAttempts) throw err;
+                    await new Promise(function(r){ setTimeout(r, 2500 * attempt); });
+                }
+            }
+            throw lastErr;
+        }
+
+        const qs = await fetchSingle();
+        return { subject: subject, mode: mode, questions: qs, round: roundNum };
+    }
 
     const subjectRules = {
         English:
@@ -691,7 +791,8 @@ app.post("/quiz", async (req, res) => {
     const {
         subject = "English",
         mode = "Study",
-        questionCount = 30
+        questionCount = 30,
+        round = null
     } = req.body;
 
     try {
@@ -699,7 +800,8 @@ app.post("/quiz", async (req, res) => {
         const quiz = await createAIQuiz(
             subject,
             mode,
-            questionCount
+            questionCount,
+            round
         );
 
         res.status(200).json(quiz);
