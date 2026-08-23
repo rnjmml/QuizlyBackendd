@@ -1702,6 +1702,31 @@ app.post(
         let room =
             findPlayerRoom(id);
 
+        const forceNew = req.body.forceNew === true;
+
+        if(room && forceNew && room.status !== "waiting"){
+            room.players =
+                room.players.filter(function(p){
+                    return p.id !== id;
+                });
+
+            if(room.players.length === 0){
+                const idx = rooms.indexOf(room);
+                if(idx !== -1) rooms.splice(idx, 1);
+            }
+
+            console.log(
+                "FORCE NEW ROOM: removed",
+                id,
+                "from",
+                room.id,
+                "status was",
+                room.status
+            );
+
+            room = null;
+        }
+
         if (!room) {
 
             room =
