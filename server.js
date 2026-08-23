@@ -400,13 +400,18 @@ Rules:
                     return qs;
                 }catch(err){
                     lastErr = err;
+                    if(err.response){
+                        console.log(`Prior status: ${err.response.status}`);
+                        console.log(JSON.stringify(err.response.data,null,2));
+                    }
                     const isTimeout = err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'));
                     const isPrior500 = err.response && err.response.status >= 500;
+                    const isRateLimit = err.response && (err.response.status === 403 || err.response.status === 429);
                     const isValidation = err.message && (err.message.includes('did not return 10 valid') || err.message.includes('invalid quiz format'));
-                    const shouldRetry = isTimeout || isPrior500 || isValidation;
+                    const shouldRetry = isTimeout || isPrior500 || isRateLimit || isValidation;
                     console.log(`ROUND ${roundNum} attempt ${attempt} failed: ${err.message}` + (shouldRetry && attempt < maxAttempts ? " — retrying..." : ""));
                     if(!shouldRetry || attempt === maxAttempts) throw err;
-                    await new Promise(function(r){ setTimeout(r, 2500 * attempt); });
+                    await new Promise(function(r){ setTimeout(r, 3500 * attempt); });
                 }
             }
             throw lastErr;
@@ -580,13 +585,18 @@ Rules:
                     return qs;
                 } catch (err) {
                     lastErr = err;
+                    if(err.response){
+                        console.log(`Prior status: ${err.response.status}`);
+                        console.log(JSON.stringify(err.response.data,null,2));
+                    }
                     const isTimeout = err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'));
                     const isPrior500 = err.response && err.response.status >= 500;
+                    const isRateLimit = err.response && (err.response.status === 403 || err.response.status === 429);
                     const isValidation = err.message && (err.message.includes('did not return 10 valid') || err.message.includes('invalid quiz format'));
-                    const shouldRetry = isTimeout || isPrior500 || isValidation;
+                    const shouldRetry = isTimeout || isPrior500 || isRateLimit || isValidation;
                     console.log(diffLabel + " attempt " + attempt + " failed: " + err.message + (shouldRetry && attempt < maxAttempts ? " — retrying..." : ""));
                     if (!shouldRetry || attempt === maxAttempts) throw err;
-                    await new Promise(function(r){ setTimeout(r, 2500 * attempt); });
+                    await new Promise(function(r){ setTimeout(r, 3500 * attempt); });
                 }
             }
             throw lastErr;
