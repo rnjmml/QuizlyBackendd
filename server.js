@@ -1686,7 +1686,7 @@ app.post(
         let room =
             findPlayerRoom(id);
 
-        if(room && room.status !== "waiting"){
+        if(room && (room.status === "active" || room.status === "finished")){
             room.players =
                 room.players.filter(function(p){
                     return p.id !== id;
