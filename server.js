@@ -1394,15 +1394,17 @@ async function generateRoomQuiz(room) {
         console.log("ROOM SUBJECT BEFORE AI:", room.subject);
         console.log("ROOM ID:", room.id);
         console.log("GENERATING QUIZ FOR:", room.subject);
+        console.log("STAGED: Round 1 EASY first");
 
-        const quiz =
+        const easyQuiz =
             await createAIQuiz(
                 room.subject,
                 "Compete",
-                30
+                10,
+                1
             );
 
-        room.quiz = quiz;
+        room.quiz = easyQuiz;
 
         room.quizStatus = "ready";
 
@@ -1424,11 +1426,51 @@ async function generateRoomQuiz(room) {
         );
 
         console.log(
+            "ROUND 1 READY, starting game, prefetching remaining..."
+        );
+
+        (async function(){
+            try{
+                console.log("Prefetching Round 2 INTERMEDIATE for", room.id);
+                const medQuiz =
+                    await createAIQuiz(
+                        room.subject,
+                        "Compete",
+                        10,
+                        2
+                    );
+
+                if(room.quiz && room.quiz.questions){
+                    room.quiz.questions =
+                        room.quiz.questions.concat(medQuiz.questions);
+                    console.log("ROUND 2 appended, total", room.quiz.questions.length, "for", room.id);
+                }
+
+                console.log("Prefetching Round 3 HARD for", room.id);
+                const hardQuiz =
+                    await createAIQuiz(
+                        room.subject,
+                        "Compete",
+                        10,
+                        3
+                    );
+
+                if(room.quiz && room.quiz.questions){
+                    room.quiz.questions =
+                        room.quiz.questions.concat(hardQuiz.questions);
+                    console.log("ROUND 3 appended, total", room.quiz.questions.length, "for", room.id);
+                }
+            }catch(e){
+                console.log("Background prefetch failed for", room.id, e.message);
+            }
+        })();
+
+        console.log(
             "================================="
         );
 
         console.log(
-            "MATCHMAKING QUIZ READY"
+            "MATCHMAKING QUIZ READY (Round 1)"
         );
 
         console.log(
@@ -1437,7 +1479,7 @@ async function generateRoomQuiz(room) {
         );
 
         console.log(
-            "All players will receive the same quiz."
+            "All players will receive the same quiz (staged 10+10+10)."
         );
 
         console.log(
@@ -1631,6 +1673,18 @@ function advanceRoom(room) {
         questions.length - 1;
 
     if (room.currentQuestion >= last) {
+
+        if(room.quiz.questions.length < 30){
+            console.log(
+                "ROOM",
+                room.id,
+                "at end of available",
+                room.quiz.questions.length,
+                "waiting for next batch..."
+            );
+            setTimeout(function(){ checkQuestionTimer(room); }, 1000);
+            return;
+        }
 
         room.status = "finished";
 
